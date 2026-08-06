@@ -39,7 +39,7 @@ import {
 } from '../domain/wallet.js';
 import {
   createBroadcast,
-  getBroadcastStreamConfig,
+  getBroadcastStreamConfig as getBroadcastStreamConfigInternal,
   getSupportedPlatforms,
   simulateBroadcastError,
   startBroadcast,
@@ -47,7 +47,6 @@ import {
   updateBroadcastViewers,
   validateBroadcastPlatforms,
 } from '../domain/live-broadcast.js';
-
 function now() {
   return new Date().toISOString();
 }
@@ -899,7 +898,16 @@ export async function rejectPayment(entryId, reason, actor) {
     throw new Error('Entry not found');
   });
 }
+export async function getBroadcastStreamConfig(broadcastId) {
+  const state = await readState();
+  const broadcast = (state.liveBroadcasts || []).find((item) => item.id === broadcastId);
 
+  if (!broadcast) {
+    throw new Error('Broadcast not found');
+  }
+
+  return getBroadcastStreamConfigInternal(broadcast);
+}
 export async function drawRound(roundId, actor) {
   requireRole(actor, [ROLES.ADMIN, ROLES.SUPER_ADMIN]);
   return mutateState((state) => {
@@ -1091,9 +1099,13 @@ export async function getWithdrawalQueue(user) {
   return buildWithdrawalQueue(state);
 }
 
-export async function getBroadcastConfig(broadcastId) {
+export async function getBroadcastStreamConfig(broadcastId) {
   const state = await readState();
   const broadcast = (state.liveBroadcasts || []).find((item) => item.id === broadcastId);
-  if (!broadcast) throw new Error('Broadcast not found');
-  return getBroadcastStreamConfig(broadcast);
+
+  if (!broadcast) {
+    throw new Error('Broadcast not found');
+  }
+
+  return getBroadcastStreamConfigInternal(broadcast);
 }
