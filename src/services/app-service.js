@@ -1099,13 +1099,3 @@ export async function getWithdrawalQueue(user) {
   return buildWithdrawalQueue(state);
 }
 
-export async function getBroadcastStreamConfig(broadcastId) {
-  const state = await readState();
-  const broadcast = (state.liveBroadcasts || []).find((item) => item.id === broadcastId);
-
-  if (!broadcast) {
-    throw new Error('Broadcast not found');
-  }
-
-  return getBroadcastStreamConfigInternal(broadcast);
-}
