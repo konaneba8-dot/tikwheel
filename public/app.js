@@ -370,10 +370,12 @@ function renderLogin() {
             <div class="field"><label>Phone</label><input name="phone" required /></div>
           </div>
           <div class="row">
-            <div class="field"><label>Email</label><input name="email" type="email" /></div>
+            <div class="field"><label>Email (Optional)</label><input name="email" type="email" /></div>
             <div class="field"><label>Password</label><input name="password" type="password" required /></div>
           </div>
-          <div class="field"><label>Location</label><input name="location" /></div>
+          <div class="notice">
+            <small class="muted">Note: Your account will require admin verification before you can log in. This typically takes 24-48 hours.</small>
+          </div>
           <label class="checkbox-row">
             <input type="checkbox" name="acceptTerms" required />
             <span>I agree to the <a href="/terms">General Terms and Conditions</a>.</span>
@@ -910,13 +912,21 @@ function renderWallet() {
           <label>Payment Method</label>
           <select name="paymentMethod" required>
             <option value="">Select method</option>
-            <option value="bank_transfer">Bank Transfer</option>
-            <option value="mobile_wallet">Mobile Wallet</option>
+            ${bootstrap.paymentMethods.filter(pm => pm.isActive).map(pm => `<option value="${pm.id}">${escapeHtml(pm.name)}</option>`).join('')}
           </select>
         </div>
         <div class="field">
-          <label>Reference / Transaction ID</label>
-          <input name="reference" required placeholder="Enter reference" />
+          <label>Referral Number (Optional)</label>
+          <input name="referralNumber" placeholder="Enter referral number if available" />
+        </div>
+        <div class="field">
+          <label>ID Document URL (Required)</label>
+          <input name="idDocumentUrl" type="url" required placeholder="Upload Ethiopian National ID or Fayda ID Card" />
+          <small class="muted">Clear image of government-issued ID required for verification</small>
+        </div>
+        <div class="field">
+          <label>Payment Receipt URL (Optional)</label>
+          <input name="receiptUrl" type="url" placeholder="Upload payment receipt" />
         </div>
         <button class="primary-btn" type="submit">Submit Deposit</button>
         <button class="ghost-btn" type="button" id="cancel-deposit">Cancel</button>
@@ -980,7 +990,11 @@ function renderWallet() {
     const data = {
       amount: Number(formData.get('amount')),
       paymentMethod: formData.get('paymentMethod'),
-      paymentDetails: { reference: formData.get('reference') },
+      paymentDetails: {
+        referralNumber: formData.get('referralNumber') || null,
+        idDocumentUrl: formData.get('idDocumentUrl'),
+        receiptUrl: formData.get('receiptUrl') || null,
+      },
     };
     try {
       const response = await fetch('/api/wallet/deposit', {
@@ -991,7 +1005,7 @@ function renderWallet() {
       });
       const result = await response.json();
       if (response.ok) {
-        alert('Deposit request submitted successfully!');
+        alert('Deposit request submitted successfully! Your deposit will be reviewed by admin.');
         document.getElementById('deposit-form-section').style.display = 'none';
         e.target.reset();
         bootstrap().then(() => renderWallet());
@@ -1162,8 +1176,11 @@ function renderAdmin() {
   const liveBroadcast = bootstrap.liveBroadcast || { summary: { total: 0, live: 0, scheduled: 0, errors: 0 }, supportedPlatforms: [], broadcasts: [] };
   const failedShareLogs = (bootstrap.promotionDashboard?.logs || []).filter((log) => log.status === 'failed').slice(0, 10);
   const withdrawalQueue = bootstrap.withdrawalQueue || [];
+  const depositQueue = bootstrap.depositQueue || [];
+  const pendingVerifications = bootstrap.pendingVerifications || [];
+  const financialSettings = bootstrap.financialSettings || null;
 
-  if (!user || !['ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
+  if (!user || !['ADMIN', 'SUPER_ADMIN', 'MONEY_ADMIN'].includes(user.role)) {
     app.innerHTML = `
       <section class="hero">
         <div class="eyebrow">Admin access required</div>
@@ -1185,6 +1202,47 @@ function renderAdmin() {
       <div class="card"><strong>Ready to draw</strong><div class="metric-value">${bootstrap.adminSummary?.readyRounds ?? 0}</div><div class="metric-label">Rounds ready</div></div>
       <div class="card"><strong>Pending payments</strong><div class="metric-value">${bootstrap.adminSummary?.pendingPayments ?? 0}</div><div class="metric-label">Waiting review</div></div>
     </section>
+    
+    ${['ADMIN', 'SUPER_ADMIN'].includes(user.role) ? `
+    <section class="card">
+      <strong>Pending User Verifications (${pendingVerifications.length})</strong>
+      <div class="stack">
+        ${pendingVerifications.length ? pendingVerifications.map((verificationUser) => `
+          <div class="notice">
+            <strong>${escapeHtml(verificationUser.fullName)} (${escapeHtml(verificationUser.phone)})</strong>
+            <div class="small">Email: ${escapeHtml(verificationUser.email || 'Not provided')}</div>
+            <div class="small muted">Location: ${escapeHtml(verificationUser.location || 'Not provided')}</div>
+            <div class="small muted">Registered: ${escapeHtml(verificationUser.createdAt || '')}</div>
+            <div class="section-actions">
+              <button class="action-btn" data-verification-approve="${verificationUser.id}">Approve</button>
+              <button class="ghost-btn" data-verification-reject="${verificationUser.id}">Reject</button>
+            </div>
+          </div>
+        `).join('') : '<div class="muted">No pending user verifications.</div>'}
+      </div>
+    </section>
+    ` : ''}
+    
+    <section class="card">
+      <strong>Pending Deposits (${depositQueue.length})</strong>
+      <div class="stack">
+        ${depositQueue.length ? depositQueue.map((deposit) => `
+          <div class="notice">
+            <strong>${escapeHtml(deposit.userName)} (${escapeHtml(deposit.userPhone)})</strong>
+            <div class="small">Amount: ${deposit.amount} ETB | Status: ${escapeHtml(deposit.status)}</div>
+            <div class="small muted">Payment Method: ${escapeHtml(deposit.paymentMethod || 'N/A')}</div>
+            <div class="small muted">Referral: ${escapeHtml(deposit.referralNumber || 'None')}</div>
+            ${deposit.idDocumentUrl ? `<div class="small"><a href="${escapeHtml(deposit.idDocumentUrl)}" target="_blank">View ID Document</a></div>` : ''}
+            ${deposit.receiptUrl ? `<div class="small"><a href="${escapeHtml(deposit.receiptUrl)}" target="_blank">View Receipt</a></div>` : ''}
+            <div class="section-actions">
+              <button class="action-btn" data-deposit-approve="${deposit.id}">Approve</button>
+              <button class="ghost-btn" data-deposit-reject="${deposit.id}">Reject</button>
+            </div>
+          </div>
+        `).join('') : '<div class="muted">No pending deposits.</div>'}
+      </div>
+    </section>
+    
     <section class="card">
       <strong>Pending Withdrawals (${withdrawalQueue.length})</strong>
       <div class="stack">
@@ -1202,6 +1260,24 @@ function renderAdmin() {
         `).join('') : '<div class="muted">No pending withdrawals.</div>'}
       </div>
     </section>
+    
+    ${user.role === 'SUPER_ADMIN' && financialSettings ? `
+    <section class="card">
+      <strong>Financial Settings</strong>
+      <form class="form" id="financial-settings-form">
+        <div class="grid cols-2">
+          <div class="field"><label>Platform Fee (%)</label><input name="platformFee" type="number" step="0.1" value="${financialSettings.platformFee}" required /></div>
+          <div class="field"><label>Game Entry Price (ETB)</label><input name="gameEntryPrice" type="number" value="${financialSettings.gameEntryPrice}" required /></div>
+          <div class="field"><label>Government Tax (%)</label><input name="governmentTax" type="number" step="0.1" value="${financialSettings.governmentTax}" required /></div>
+          <div class="field"><label>Minimum Deposit (ETB)</label><input name="minimumDeposit" type="number" value="${financialSettings.minimumDeposit}" required /></div>
+          <div class="field"><label>Minimum Withdrawal (ETB)</label><input name="minimumWithdrawal" type="number" value="${financialSettings.minimumWithdrawal}" required /></div>
+          <div class="field"><label>Currency</label><input name="currency" value="${escapeHtml(financialSettings.currency)}" required /></div>
+        </div>
+        <button class="primary-btn" type="submit">Update Financial Settings</button>
+      </form>
+    </section>
+    ` : ''}
+    
     <section class="grid cols-4">
       <div class="card"><strong>Total scheduled shares</strong><div class="metric-value">${promotionSummary.totalScheduledShares}</div><div class="metric-label">Share jobs</div></div>
       <div class="card"><strong>Completed shares</strong><div class="metric-value">${promotionSummary.completedShares}</div><div class="metric-label">Approved sends</div></div>
@@ -1638,6 +1714,59 @@ function bindAdminForms() {
       location.reload();
     });
   });
+
+  document.querySelectorAll('[data-verification-approve]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const id = button.dataset.verificationApprove;
+      if (!confirm('Approve this user verification? This will activate their account.')) return;
+      await postJson(`/api/admin/verifications/${encodeURIComponent(id)}/approve`, {});
+      location.reload();
+    });
+  });
+
+  document.querySelectorAll('[data-verification-reject]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const id = button.dataset.verificationReject;
+      const reason = prompt('Enter rejection reason:');
+      if (!reason) return;
+      await postJson(`/api/admin/verifications/${encodeURIComponent(id)}/reject`, { reason });
+      location.reload();
+    });
+  });
+
+  document.querySelectorAll('[data-deposit-approve]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const id = button.dataset.depositApprove;
+      if (!confirm('Approve this deposit? This will credit the amount to the user wallet.')) return;
+      await postJson(`/api/admin/deposits/${encodeURIComponent(id)}/complete`, {});
+      location.reload();
+    });
+  });
+
+  document.querySelectorAll('[data-deposit-reject]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const id = button.dataset.depositReject;
+      const reason = prompt('Enter rejection reason:');
+      if (!reason) return;
+      await postJson(`/api/admin/deposits/${encodeURIComponent(id)}/reject`, { reason });
+      location.reload();
+    });
+  });
+
+  const financialSettingsForm = document.querySelector('#financial-settings-form');
+  if (financialSettingsForm) {
+    financialSettingsForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const data = Object.fromEntries(new FormData(financialSettingsForm).entries());
+      data.platformFee = Number(data.platformFee);
+      data.gameEntryPrice = Number(data.gameEntryPrice);
+      data.governmentTax = Number(data.governmentTax);
+      data.minimumDeposit = Number(data.minimumDeposit);
+      data.minimumWithdrawal = Number(data.minimumWithdrawal);
+      await putJson('/api/admin/financial-settings', data);
+      location.reload();
+    });
+  }
 }
 
 function renderLivestream() {
@@ -2055,6 +2184,20 @@ function toPoint(cx, cy, radius, angleDegrees) {
 async function postJson(url, body) {
   const response = await fetch(url, {
     method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(translateError(data.error || 'Request failed'));
+  }
+  return data;
+}
+
+async function putJson(url, body) {
+  const response = await fetch(url, {
+    method: 'PUT',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

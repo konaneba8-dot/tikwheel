@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { PORT, SESSION_COOKIE } from './src/config.js';
 import { parseCookies, serializeCookie, verifySignedToken } from './src/lib/security.js';
 import {
-  attachPaymentReceipt,
+  approveUserVerification,
   approveWithdrawal,
   bootstrapState,
   changeRoundStatus,
@@ -18,12 +18,17 @@ import {
   createPromotionCampaign,
   createRound,
   createWithdrawal,
+  deletePaymentMethodAction,
   drawRound,
+  editPaymentMethodAction,
   getAuditLog,
   getBroadcastStreamConfig,
+  getDepositQueue,
+  getFinancialSettings,
   getHistory,
   getLiveBroadcastDashboard,
   getPaymentMethods,
+  getPendingVerifications,
   getPromotionDashboard,
   getRoundAuditTrail,
   getRound,
@@ -33,13 +38,16 @@ import {
   getWithdrawalQueue,
   joinRound,
   login,
+  rejectDeposit,
   rejectPayment,
+  rejectUserVerification,
   rejectWithdrawal,
   registerPlayer,
   resolveUserFromCookie,
   toggleLiveBroadcast,
   togglePaymentMethodAction,
   trackPromotionEvent,
+  updateFinancialSettings,
   verifyPayment,
 } from './src/services/app-service.js';
 import { renderAdminPage, renderAuditPage, renderDashboardPage, renderGameRulesPage, renderHistoryDetailPage, renderHistoryPage, renderHomePage, renderLivePage, renderLivestreamPage, renderLoginPage, renderRoundPage, renderTermsPage, renderWalletPage } from './src/views/pages.js';
@@ -283,6 +291,21 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, await getWithdrawalQueue(user));
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/admin/deposits') {
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    return sendJson(res, 200, await getDepositQueue(user));
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/admin/verifications') {
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    return sendJson(res, 200, await getPendingVerifications(user));
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/admin/financial-settings') {
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    return sendJson(res, 200, await getFinancialSettings(user));
+  }
+
   const broadcastConfigMatch = url.pathname.match(/^\/api\/broadcasts\/([^/]+)\/config$/);
   if (req.method === 'GET' && broadcastConfigMatch) {
     const broadcastId = decodeURIComponent(broadcastConfigMatch[1]);
@@ -367,6 +390,13 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, await completeDeposit(transactionId, user));
   }
 
+  const depositRejectMatch = url.pathname.match(/^\/api\/admin\/deposits\/([^/]+)\/reject$/);
+  if (req.method === 'POST' && depositRejectMatch) {
+    const transactionId = decodeURIComponent(depositRejectMatch[1]);
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    return sendJson(res, 200, await rejectDeposit(transactionId, body?.reason || 'Rejected by admin', user));
+  }
+
   const withdrawalApproveMatch = url.pathname.match(/^\/api\/admin\/withdrawals\/([^/]+)\/approve$/);
   if (req.method === 'POST' && withdrawalApproveMatch) {
     const transactionId = decodeURIComponent(withdrawalApproveMatch[1]);
@@ -392,6 +422,34 @@ async function handleApi(req, res, url) {
   if (req.method === 'POST' && paymentMethodToggleMatch) {
     const paymentMethodId = decodeURIComponent(paymentMethodToggleMatch[1]);
     return sendJson(res, 200, await togglePaymentMethodAction(paymentMethodId, user));
+  }
+
+  const paymentMethodEditMatch = url.pathname.match(/^\/api\/admin\/payment-methods\/([^/]+)$/);
+  if (req.method === 'PUT' && paymentMethodEditMatch) {
+    const paymentMethodId = decodeURIComponent(paymentMethodEditMatch[1]);
+    return sendJson(res, 200, await editPaymentMethodAction(paymentMethodId, body || {}, user));
+  }
+
+  const paymentMethodDeleteMatch = url.pathname.match(/^\/api\/admin\/payment-methods\/([^/]+)$/);
+  if (req.method === 'DELETE' && paymentMethodDeleteMatch) {
+    const paymentMethodId = decodeURIComponent(paymentMethodDeleteMatch[1]);
+    return sendJson(res, 200, await deletePaymentMethodAction(paymentMethodId, user));
+  }
+
+  const userVerificationApproveMatch = url.pathname.match(/^\/api\/admin\/verifications\/([^/]+)\/approve$/);
+  if (req.method === 'POST' && userVerificationApproveMatch) {
+    const userId = decodeURIComponent(userVerificationApproveMatch[1]);
+    return sendJson(res, 200, await approveUserVerification(userId, user));
+  }
+
+  const userVerificationRejectMatch = url.pathname.match(/^\/api\/admin\/verifications\/([^/]+)\/reject$/);
+  if (req.method === 'POST' && userVerificationRejectMatch) {
+    const userId = decodeURIComponent(userVerificationRejectMatch[1]);
+    return sendJson(res, 200, await rejectUserVerification(userId, body?.reason || 'Verification rejected', user));
+  }
+
+  if (req.method === 'PUT' && url.pathname === '/api/admin/financial-settings') {
+    return sendJson(res, 200, await updateFinancialSettings(body || {}, user));
   }
 
   const joinMatch = url.pathname.match(/^\/api\/player\/rounds\/([^/]+)\/join$/);

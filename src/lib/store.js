@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
 import mysql from 'mysql2/promise';
 import { DEFAULT_COMPLIANCE_MODE, DEFAULT_ENTRY_LOCK_MINUTES, STATE_FILE, getMysqlConfig, getStorageMode } from '../config.js';
-import { ROLES, ROUND_STATUSES, PAYMENT_STATUSES } from '../domain/statuses.js';
+import { ROLES, ROUND_STATUSES, PAYMENT_STATUSES, USER_VERIFICATION_STATUSES } from '../domain/statuses.js';
 import { hashPassword } from './security.js';
 
 const now = () => new Date().toISOString();
@@ -52,16 +52,35 @@ function seededGameTypes() {
 function seedUsers() {
   const adminPass = hashPassword('Admin123!');
   const playerPass = hashPassword('Player123!');
+  const superAdminPass = hashPassword('SuperAdmin123!');
   return [
     {
       id: createId('usr'),
       role: ROLES.SUPER_ADMIN,
+      fullName: 'Super Admin',
+      phone: '+251911234567',
+      email: 'konaneba8@gmail.com',
+      passwordHash: superAdminPass.hash,
+      salt: superAdminPass.salt,
+      location: 'Addis Ababa',
+      verificationStatus: USER_VERIFICATION_STATUSES.VERIFIED,
+      acceptedTermsVersion: '1.0',
+      acceptedGameRulesVersion: '1.0',
+      acceptedTermsAt: now(),
+      acceptedGameRulesAt: now(),
+      createdAt: now(),
+      updatedAt: now(),
+    },
+    {
+      id: createId('usr'),
+      role: ROLES.ADMIN,
       fullName: 'Tikwheel Admin',
       phone: '+0000000000',
       email: 'admin@tikwheel.local',
       passwordHash: adminPass.hash,
       salt: adminPass.salt,
       location: 'Demo',
+      verificationStatus: USER_VERIFICATION_STATUSES.VERIFIED,
       acceptedTermsVersion: '1.0',
       acceptedGameRulesVersion: '1.0',
       acceptedTermsAt: now(),
@@ -78,6 +97,7 @@ function seedUsers() {
       passwordHash: playerPass.hash,
       salt: playerPass.salt,
       location: 'Demo',
+      verificationStatus: USER_VERIFICATION_STATUSES.VERIFIED,
       acceptedTermsVersion: '1.0',
       acceptedGameRulesVersion: '1.0',
       acceptedTermsAt: now(),

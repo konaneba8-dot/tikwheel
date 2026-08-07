@@ -28,6 +28,9 @@ export function createDepositTransaction(userId, amount, paymentMethod, paymentD
     status: TRANSACTION_STATUSES.PENDING,
     paymentMethod: String(paymentMethod || 'unknown'),
     paymentDetails: paymentDetails || {},
+    referralNumber: paymentDetails?.referralNumber || null,
+    idDocumentUrl: paymentDetails?.idDocumentUrl || null,
+    receiptUrl: paymentDetails?.receiptUrl || null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -130,6 +133,39 @@ export function failDepositTransaction(transaction, reason) {
   transaction.updatedAt = new Date().toISOString();
 
   return transaction;
+}
+
+export function createPrizeTransaction(userId, amount, roundId, position) {
+  const amountNum = Number(amount);
+  if (Number.isNaN(amountNum) || amountNum <= 0) {
+    throw new Error('Prize amount must be greater than 0');
+  }
+
+  return {
+    id: `txn_${crypto.randomUUID()}`,
+    userId,
+    type: 'PRIZE',
+    amount: amountNum,
+    status: TRANSACTION_STATUSES.COMPLETED,
+    roundId,
+    position,
+    description: `Prize for winning position ${position} in round`,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function creditPrizeToWallet(transaction, wallet) {
+  if (transaction.type !== 'PRIZE') {
+    throw new Error('Transaction is not a prize');
+  }
+
+  if (transaction.status === TRANSACTION_STATUSES.COMPLETED) {
+    wallet.balance += transaction.amount;
+    wallet.updatedAt = new Date().toISOString();
+  }
+
+  return { transaction, wallet };
 }
 
 export function getUserWallet(state, userId) {
