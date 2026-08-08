@@ -14,6 +14,10 @@ const state = {
   dashboardFilter: 'all',
   liveMode: localStorage.getItem('tikwheel-live-mode') === 'true',
   liveCountdownTimer: null,
+  depositStep: 0,
+  depositData: {},
+  withdrawStep: 0,
+  withdrawData: {},
 };
 
 initI18n({ onChange: () => renderCurrentPage() });
@@ -188,6 +192,42 @@ function renderError(error) {
   `;
 }
 
+function showDepositStep(step) {
+  for (let i = 0; i <= 5; i++) {
+    const stepElement = document.getElementById(`deposit-step-${i}`);
+    if (stepElement) {
+      stepElement.style.display = i === step ? 'block' : 'none';
+    }
+  }
+
+  if (step === 4) {
+    document.getElementById('review-deposit-amount').textContent = state.depositData.amount;
+    const paymentMethod = state.bootstrap.paymentMethods.find(pm => pm.id === state.depositData.paymentMethod);
+    document.getElementById('review-deposit-method').textContent = paymentMethod ? paymentMethod.name : state.depositData.paymentMethod;
+    document.getElementById('review-deposit-receipt').textContent = state.depositData.receiptUrl;
+  }
+}
+
+function showWithdrawStep(step) {
+  for (let i = 0; i <= 5; i++) {
+    const stepElement = document.getElementById(`withdraw-step-${i}`);
+    if (stepElement) {
+      stepElement.style.display = i === step ? 'block' : 'none';
+    }
+  }
+
+  if (step === 3) {
+    document.getElementById('review-withdraw-amount').textContent = state.withdrawData.amount;
+    document.getElementById('review-withdraw-account').textContent = `${state.withdrawData.accountName} - ${state.withdrawData.accountNumber}`;
+    document.getElementById('review-withdraw-method').textContent = state.withdrawData.paymentMethod;
+  }
+
+  if (step === 4) {
+    document.getElementById('confirm-withdraw-amount').textContent = state.withdrawData.amount;
+    document.getElementById('confirm-withdraw-account').textContent = `${state.withdrawData.accountName} - ${state.withdrawData.accountNumber}`;
+  }
+}
+
 async function loadRound(id) {
   if (!id) return null;
   const response = await fetch(`/api/rounds/${encodeURIComponent(id)}`, { credentials: 'include' });
@@ -215,7 +255,7 @@ function renderHome() {
   const openRounds = bootstrap.rounds || [];
   app.innerHTML = `
     <section class="hero">
-      <div class="eyebrow">Demo / Test Mode</div>
+      <div class="eyebrow">TikWheel</div>
       <h1>Dynamic live wheels with backend-selected winners.</h1>
       <p>TikWheel is built so the number of wheel sections always matches the number of eligible verified players. No fixed 100-slice wheel, no frontend winner choice.</p>
       <div class="hero-actions">
@@ -265,6 +305,29 @@ function renderHome() {
             <span>I agree to the <a href="/game-rules">Official Game Rules</a>.</span>
           </label>
           <button class="primary-btn" type="submit">Create player account</button>
+          <div class="social-signup">
+            <div class="social-divider">Or sign up with</div>
+            <div class="social-buttons">
+              <button class="social-btn google-btn" type="button" data-provider="google">
+                <span class="social-icon">G</span> Google
+              </button>
+              <button class="social-btn facebook-btn" type="button" data-provider="facebook">
+                <span class="social-icon">f</span> Facebook
+              </button>
+              <button class="social-btn instagram-btn" type="button" data-provider="instagram">
+                <span class="social-icon">📷</span> Instagram
+              </button>
+              <button class="social-btn tiktok-btn" type="button" data-provider="tiktok">
+                <span class="social-icon">♪</span> TikTok
+              </button>
+              <button class="social-btn x-btn" type="button" data-provider="twitter">
+                <span class="social-icon">X</span> X
+              </button>
+              <button class="social-btn telegram-btn" type="button" data-provider="telegram">
+                <span class="social-icon">✈</span> Telegram
+              </button>
+            </div>
+          </div>
         </form>
       </div>
     </section>
@@ -330,6 +393,37 @@ function bindAuthForms() {
       location.reload();
     });
   }
+
+  // Social sign-up button handlers
+  document.querySelectorAll('.social-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const provider = btn.dataset.provider;
+      handleSocialSignup(provider);
+    });
+  });
+}
+
+function handleSocialSignup(provider) {
+  // OAuth configuration - redirect to social provider
+  const oauthUrls = {
+    google: 'https://accounts.google.com/o/oauth2/v2/auth',
+    facebook: 'https://www.facebook.com/v18.0/dialog/oauth',
+    instagram: 'https://api.instagram.com/oauth/authorize',
+    tiktok: 'https://www.tiktok.com/v2/auth/authorize',
+    twitter: 'https://twitter.com/i/oauth2/authorize',
+    telegram: 'https://oauth.telegram.org/auth'
+  };
+
+  // This would need to be configured with actual client IDs and redirect URIs
+  // For now, show a message that OAuth needs to be configured
+  alert(`Social sign-up with ${provider} is not yet configured. Please use email registration for now.`);
+
+  // Example implementation (would need actual OAuth setup):
+  // const clientId = getOAuthClientId(provider);
+  // const redirectUri = encodeURIComponent(window.location.origin + '/auth/callback/' + provider);
+  // const scope = getOAuthScope(provider);
+  // const authUrl = `${oauthUrls[provider]}?client_id=${clientId}&redirect_uri=${redirectUri}&scope=${scope}&response_type=code`;
+  // window.location.href = authUrl;
 }
 
 function bindJoinButtons() {
@@ -349,7 +443,7 @@ function renderLogin() {
     <section class="hero">
       <div class="eyebrow">Access</div>
       <h1>Login or register to join rounds.</h1>
-      <p class="muted">Demo users: <strong>player@tikwheel.local / Player123!</strong> and <strong>admin@tikwheel.local / Admin123!</strong></p>
+      <p class="muted">Create an account to get started.</p>
     </section>
     <section class="grid cols-2">
       <div class="card">
@@ -385,6 +479,29 @@ function renderLogin() {
             <span>I agree to the <a href="/game-rules">Official Game Rules</a>.</span>
           </label>
           <button class="primary-btn" type="submit">Create account</button>
+          <div class="social-signup">
+            <div class="social-divider">Or sign up with</div>
+            <div class="social-buttons">
+              <button class="social-btn google-btn" type="button" data-provider="google">
+                <span class="social-icon">G</span> Google
+              </button>
+              <button class="social-btn facebook-btn" type="button" data-provider="facebook">
+                <span class="social-icon">f</span> Facebook
+              </button>
+              <button class="social-btn instagram-btn" type="button" data-provider="instagram">
+                <span class="social-icon">📷</span> Instagram
+              </button>
+              <button class="social-btn tiktok-btn" type="button" data-provider="tiktok">
+                <span class="social-icon">♪</span> TikTok
+              </button>
+              <button class="social-btn x-btn" type="button" data-provider="twitter">
+                <span class="social-icon">X</span> X
+              </button>
+              <button class="social-btn telegram-btn" type="button" data-provider="telegram">
+                <span class="social-icon">✈</span> Telegram
+              </button>
+            </div>
+          </div>
         </form>
       </div>
     </section>
@@ -695,8 +812,8 @@ function renderRoundDetail() {
       <div class="card">
         <strong>Payment instructions</strong>
         <div class="notice">
-          <div class="small">Demo mode: submit the join form after selecting a free position.</div>
-          <div class="small muted">Real deployments should replace this with configured payment methods and country-specific compliance rules.</div>
+          <div class="small">Submit the join form after selecting a free position.</div>
+          <div class="small muted">Payment methods and compliance rules are configured by administrators.</div>
         </div>
         <div class="stack">
           ${paymentMethods.length ? paymentMethods.map((method) => `
@@ -863,7 +980,7 @@ function renderWallet() {
       <section class="hero">
         <div class="eyebrow">Wallet</div>
         <h1>Please log in to view your wallet.</h1>
-        <p class="muted">Use the seeded demo player or create a new account.</p>
+        <p class="muted">Create a new account to get started.</p>
         <div class="hero-actions"><a class="primary-btn" href="/login">Go to login</a></div>
       </section>
     `;
@@ -877,15 +994,23 @@ function renderWallet() {
 
   const wallet = walletData.wallet;
   const transactions = walletData.transactions || [];
+  const isVerified = user.verificationStatus === 'VERIFIED';
 
   app.innerHTML = `
     <section class="hero">
       <div class="eyebrow">Wallet</div>
       <h1>Your balance: ${wallet.balance} ${wallet.currency}</h1>
       <p class="muted">Manage deposits, withdrawals, and view transaction history.</p>
+      ${!isVerified ? `
+        <div class="notice" style="background-color: #fff3cd; border: 1px solid #ffc107; padding: 1rem; margin: 1rem 0;">
+          <strong>Account Verification Required</strong>
+          <p class="small muted">Your account is pending verification. Deposits and withdrawals are only available after admin approval.</p>
+          <p class="small muted">Status: ${escapeHtml(user.verificationStatus || 'Pending')}</p>
+        </div>
+      ` : ''}
       <div class="hero-actions">
-        <button class="primary-btn" id="deposit-btn">Deposit</button>
-        <button class="ghost-btn" id="withdraw-btn">Withdraw</button>
+        <button class="primary-btn" id="deposit-btn" ${!isVerified ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''}>Deposit</button>
+        <button class="ghost-btn" id="withdraw-btn" ${!isVerified ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''}>Withdraw</button>
       </div>
     </section>
     <section class="card">
@@ -903,99 +1028,306 @@ function renderWallet() {
     </section>
     <section class="card" id="deposit-form-section" style="display: none;">
       <strong>Deposit Funds</strong>
-      <form class="form" id="deposit-form">
-        <div class="field">
-          <label>Amount (ETB)</label>
-          <input name="amount" type="number" min="1" required placeholder="Enter amount" />
+      <div id="deposit-step-0" style="display: block;">
+        <div class="stack">
+          <p class="muted">Step 1 of 6: Enter Amount</p>
+          <div class="field">
+            <label>Amount (ETB)</label>
+            <input id="deposit-amount" type="number" min="1" required placeholder="Enter amount" />
+          </div>
+          <button class="primary-btn" id="deposit-step-0-next">Next</button>
+          <button class="ghost-btn" type="button" id="cancel-deposit">Cancel</button>
         </div>
-        <div class="field">
-          <label>Payment Method</label>
-          <select name="paymentMethod" required>
-            <option value="">Select method</option>
-            ${bootstrap.paymentMethods.filter(pm => pm.isActive).map(pm => `<option value="${pm.id}">${escapeHtml(pm.name)}</option>`).join('')}
-          </select>
+      </div>
+      <div id="deposit-step-1" style="display: none;">
+        <div class="stack">
+          <p class="muted">Step 2 of 6: Select Bank/Wallet</p>
+          <div class="field">
+            <label>Payment Method</label>
+            <select id="deposit-payment-method" required>
+              <option value="">Select method</option>
+              ${bootstrap.paymentMethods.filter(pm => pm.isActive).map(pm => `<option value="${pm.id}">${escapeHtml(pm.name)}</option>`).join('')}
+            </select>
+          </div>
+          <button class="ghost-btn" id="deposit-step-1-back">Back</button>
+          <button class="primary-btn" id="deposit-step-1-next">Next</button>
         </div>
-        <div class="field">
-          <label>Referral Number (Optional)</label>
-          <input name="referralNumber" placeholder="Enter referral number if available" />
+      </div>
+      <div id="deposit-step-2" style="display: none;">
+        <div class="stack">
+          <p class="muted">Step 3 of 6: Payment Account Details</p>
+          <div class="notice">
+            <strong>Payment Account Information</strong>
+            <div class="small muted">Please transfer funds to the following account:</div>
+            <div class="small">Bank: Commercial Bank of Ethiopia</div>
+            <div class="small">Account Number: 1000123456789</div>
+            <div class="small">Account Name: TikWheel PLC</div>
+          </div>
+          <button class="ghost-btn" id="deposit-step-2-back">Back</button>
+          <button class="primary-btn" id="deposit-step-2-next">Next</button>
         </div>
-        <div class="field">
-          <label>ID Document URL (Required)</label>
-          <input name="idDocumentUrl" type="url" required placeholder="Upload Ethiopian National ID or Fayda ID Card" />
-          <small class="muted">Clear image of government-issued ID required for verification</small>
+      </div>
+      <div id="deposit-step-3" style="display: none;">
+        <div class="stack">
+          <p class="muted">Step 4 of 6: Upload Payment Receipt</p>
+          <div class="field">
+            <label>Payment Receipt (Required)</label>
+            <input id="deposit-receipt-url" type="url" required placeholder="Upload payment receipt (PDF, JPG, JPEG, PNG only)" />
+            <small class="muted">Payment receipt must be PDF, JPG, JPEG, or PNG format only</small>
+          </div>
+          <div id="deposit-receipt-preview" style="display: none; margin-top: 10px;">
+            <strong>Receipt Preview:</strong>
+            <div id="deposit-receipt-preview-content"></div>
+          </div>
+          <button class="ghost-btn" id="deposit-step-3-back">Back</button>
+          <button class="primary-btn" id="deposit-step-3-next">Next</button>
         </div>
-        <div class="field">
-          <label>Payment Receipt URL (Optional)</label>
-          <input name="receiptUrl" type="url" placeholder="Upload payment receipt" />
+      </div>
+      <div id="deposit-step-4" style="display: none;">
+        <div class="stack">
+          <p class="muted">Step 5 of 6: Review Details</p>
+          <div class="notice">
+            <strong>Review Your Deposit</strong>
+            <div class="small">Amount: <span id="review-deposit-amount"></span> ETB</div>
+            <div class="small">Payment Method: <span id="review-deposit-method"></span></div>
+            <div class="small">Receipt: <span id="review-deposit-receipt"></span></div>
+          </div>
+          <button class="ghost-btn" id="deposit-step-4-back">Back</button>
+          <button class="primary-btn" id="deposit-step-4-next">Submit</button>
         </div>
-        <button class="primary-btn" type="submit">Submit Deposit</button>
-        <button class="ghost-btn" type="button" id="cancel-deposit">Cancel</button>
-      </form>
+      </div>
+      <div id="deposit-step-5" style="display: none;">
+        <div class="stack">
+          <p class="muted">Step 6 of 6: Deposit Submitted</p>
+          <div class="notice">
+            <strong>Deposit Submitted Successfully!</strong>
+            <div class="small muted">Your deposit is now pending admin approval.</div>
+            <div class="small muted">Status: Pending</div>
+          </div>
+          <button class="primary-btn" id="deposit-step-5-done">Done</button>
+        </div>
+      </div>
     </section>
     <section class="card" id="withdraw-form-section" style="display: none;">
       <strong>Withdraw Funds</strong>
-      <form class="form" id="withdraw-form">
-        <div class="field">
-          <label>Amount (ETB)</label>
-          <input name="amount" type="number" min="500" required placeholder="Minimum 500 ETB" />
-          <small class="muted">Minimum withdrawal: 500 ETB</small>
+      <div id="withdraw-step-0" style="display: block;">
+        <div class="stack">
+          <p class="muted">Step 1 of 6: Enter Amount</p>
+          <div class="field">
+            <label>Amount (ETB)</label>
+            <input id="withdraw-amount" type="number" min="500" required placeholder="Minimum 500 ETB" />
+            <small class="muted">Minimum withdrawal: 500 ETB</small>
+            <small class="muted">Available balance: ${wallet.balance} ETB</small>
+          </div>
+          <button class="primary-btn" id="withdraw-step-0-next">Next</button>
+          <button class="ghost-btn" type="button" id="cancel-withdraw">Cancel</button>
         </div>
-        <div class="field">
-          <label>Payment Method</label>
-          <select name="paymentMethod" required>
-            <option value="">Select method</option>
-            <option value="bank_transfer">Bank Transfer</option>
-            <option value="mobile_wallet">Mobile Wallet</option>
-          </select>
+      </div>
+      <div id="withdraw-step-1" style="display: none;">
+        <div class="stack">
+          <p class="muted">Step 2 of 6: Select/Enter Withdrawal Account</p>
+          <div class="field">
+            <label>Payment Method</label>
+            <select id="withdraw-payment-method" required>
+              <option value="">Select method</option>
+              <option value="bank_transfer">Bank Transfer</option>
+              <option value="mobile_wallet">Mobile Wallet</option>
+            </select>
+          </div>
+          <button class="ghost-btn" id="withdraw-step-1-back">Back</button>
+          <button class="primary-btn" id="withdraw-step-1-next">Next</button>
         </div>
-        <div class="field">
-          <label>Account Name</label>
-          <input name="accountName" required placeholder="Account holder name" />
+      </div>
+      <div id="withdraw-step-2" style="display: none;">
+        <div class="stack">
+          <p class="muted">Step 3 of 6: Enter Required Details</p>
+          <div class="field">
+            <label>Account Name</label>
+            <input id="withdraw-account-name" required placeholder="Account holder name" />
+          </div>
+          <div class="field">
+            <label>Account Number</label>
+            <input id="withdraw-account-number" required placeholder="Bank account or wallet number" />
+          </div>
+          <div class="field">
+            <label>Bank Name (optional)</label>
+            <input id="withdraw-bank-name" placeholder="Bank name" />
+          </div>
+          <button class="ghost-btn" id="withdraw-step-2-back">Back</button>
+          <button class="primary-btn" id="withdraw-step-2-next">Next</button>
         </div>
-        <div class="field">
-          <label>Account Number</label>
-          <input name="accountNumber" required placeholder="Bank account or wallet number" />
+      </div>
+      <div id="withdraw-step-3" style="display: none;">
+        <div class="stack">
+          <p class="muted">Step 4 of 6: Review Details</p>
+          <div class="notice">
+            <strong>Review Your Withdrawal</strong>
+            <div class="small">Amount: <span id="review-withdraw-amount"></span> ETB</div>
+            <div class="small">Account: <span id="review-withdraw-account"></span></div>
+            <div class="small">Method: <span id="review-withdraw-method"></span></div>
+          </div>
+          <button class="ghost-btn" id="withdraw-step-3-back">Back</button>
+          <button class="primary-btn" id="withdraw-step-3-next">Confirm</button>
         </div>
-        <div class="field">
-          <label>Bank Name (optional)</label>
-          <input name="bankName" placeholder="Bank name" />
+      </div>
+      <div id="withdraw-step-4" style="display: none;">
+        <div class="stack">
+          <p class="muted">Step 5 of 6: Confirm Withdrawal</p>
+          <div class="notice">
+            <strong>Are you sure you want to withdraw?</strong>
+            <div class="small muted">This action cannot be undone.</div>
+            <div class="small">Amount: <span id="confirm-withdraw-amount"></span> ETB</div>
+            <div class="small">To: <span id="confirm-withdraw-account"></span></div>
+          </div>
+          <button class="ghost-btn" id="withdraw-step-4-back">Back</button>
+          <button class="primary-btn" id="withdraw-step-4-confirm">Confirm Withdrawal</button>
         </div>
-        <button class="primary-btn" type="submit">Submit Withdrawal</button>
-        <button class="ghost-btn" type="button" id="cancel-withdraw">Cancel</button>
-      </form>
+      </div>
+      <div id="withdraw-step-5" style="display: none;">
+        <div class="stack">
+          <p class="muted">Step 6 of 6: Withdrawal Submitted</p>
+          <div class="notice">
+            <strong>Withdrawal Submitted Successfully!</strong>
+            <div class="small muted">Your withdrawal is now pending admin approval.</div>
+            <div class="small muted">Status: Pending</div>
+          </div>
+          <button class="primary-btn" id="withdraw-step-5-done">Done</button>
+        </div>
+      </div>
     </section>
   `;
 
   document.getElementById('deposit-btn')?.addEventListener('click', () => {
+    if (!isVerified) {
+      alert('Your account must be verified before making deposits. Please wait for admin approval.');
+      return;
+    }
+    state.depositStep = 0;
+    state.depositData = {};
+    showDepositStep(0);
     document.getElementById('deposit-form-section').style.display = 'block';
     document.getElementById('withdraw-form-section').style.display = 'none';
   });
 
   document.getElementById('withdraw-btn')?.addEventListener('click', () => {
+    if (!isVerified) {
+      alert('Your account must be verified before making withdrawals. Please wait for admin approval.');
+      return;
+    }
+    state.withdrawStep = 0;
+    state.withdrawData = {};
+    showWithdrawStep(0);
     document.getElementById('withdraw-form-section').style.display = 'block';
     document.getElementById('deposit-form-section').style.display = 'none';
   });
 
   document.getElementById('cancel-deposit')?.addEventListener('click', () => {
     document.getElementById('deposit-form-section').style.display = 'none';
+    state.depositStep = 0;
+    state.depositData = {};
   });
 
   document.getElementById('cancel-withdraw')?.addEventListener('click', () => {
     document.getElementById('withdraw-form-section').style.display = 'none';
+    state.withdrawStep = 0;
+    state.withdrawData = {};
   });
 
-  document.getElementById('deposit-form')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const formData = new FormData(e.target);
+  // Deposit Step 0: Enter Amount
+  document.getElementById('deposit-step-0-next')?.addEventListener('click', () => {
+    const amount = document.getElementById('deposit-amount').value;
+    if (!amount || Number(amount) <= 0) {
+      alert('Please enter a valid amount greater than 0');
+      return;
+    }
+    state.depositData.amount = Number(amount);
+    state.depositStep = 1;
+    showDepositStep(1);
+  });
+
+  // Deposit Step 1: Select Payment Method
+  document.getElementById('deposit-step-1-back')?.addEventListener('click', () => {
+    state.depositStep = 0;
+    showDepositStep(0);
+  });
+
+  document.getElementById('deposit-step-1-next')?.addEventListener('click', () => {
+    const paymentMethod = document.getElementById('deposit-payment-method').value;
+    if (!paymentMethod) {
+      alert('Please select a payment method');
+      return;
+    }
+    state.depositData.paymentMethod = paymentMethod;
+    state.depositStep = 2;
+    showDepositStep(2);
+  });
+
+  // Deposit Step 2: Payment Account Details (information only)
+  document.getElementById('deposit-step-2-back')?.addEventListener('click', () => {
+    state.depositStep = 1;
+    showDepositStep(1);
+  });
+
+  document.getElementById('deposit-step-2-next')?.addEventListener('click', () => {
+    state.depositStep = 3;
+    showDepositStep(3);
+  });
+
+  // Deposit Step 3: Upload Payment Receipt
+  document.getElementById('deposit-step-3-back')?.addEventListener('click', () => {
+    state.depositStep = 2;
+    showDepositStep(2);
+  });
+
+  document.getElementById('deposit-receipt-url')?.addEventListener('input', (e) => {
+    const receiptUrl = e.target.value;
+    const preview = document.getElementById('deposit-receipt-preview');
+    const previewContent = document.getElementById('deposit-receipt-preview-content');
+
+    if (receiptUrl) {
+      preview.style.display = 'block';
+      previewContent.innerHTML = `<a href="${escapeHtml(receiptUrl)}" target="_blank">${escapeHtml(receiptUrl)}</a>`;
+    } else {
+      preview.style.display = 'none';
+    }
+  });
+
+  document.getElementById('deposit-step-3-next')?.addEventListener('click', () => {
+    const receiptUrl = document.getElementById('deposit-receipt-url').value;
+    if (!receiptUrl) {
+      alert('Payment receipt is required');
+      return;
+    }
+
+    // Validate file type
+    const validExtensions = ['.pdf', '.jpg', '.jpeg', '.png'];
+    const hasValidExtension = validExtensions.some(ext => receiptUrl.toLowerCase().endsWith(ext));
+    if (!hasValidExtension) {
+      alert('Payment receipt must be PDF, JPG, JPEG, or PNG format only');
+      return;
+    }
+
+    state.depositData.receiptUrl = receiptUrl;
+    state.depositStep = 4;
+    showDepositStep(4);
+  });
+
+  // Deposit Step 4: Review Details
+  document.getElementById('deposit-step-4-back')?.addEventListener('click', () => {
+    state.depositStep = 3;
+    showDepositStep(3);
+  });
+
+  document.getElementById('deposit-step-4-next')?.addEventListener('click', async () => {
     const data = {
-      amount: Number(formData.get('amount')),
-      paymentMethod: formData.get('paymentMethod'),
+      amount: state.depositData.amount,
+      paymentMethod: state.depositData.paymentMethod,
       paymentDetails: {
-        referralNumber: formData.get('referralNumber') || null,
-        idDocumentUrl: formData.get('idDocumentUrl'),
-        receiptUrl: formData.get('receiptUrl') || null,
+        idDocumentUrl: state.bootstrap.user.idDocumentUrl || null,
+        receiptUrl: state.depositData.receiptUrl,
       },
     };
+
     try {
       const response = await fetch('/api/wallet/deposit', {
         method: 'POST',
@@ -1005,16 +1337,132 @@ function renderWallet() {
       });
       const result = await response.json();
       if (response.ok) {
-        alert('Deposit request submitted successfully! Your deposit will be reviewed by admin.');
-        document.getElementById('deposit-form-section').style.display = 'none';
-        e.target.reset();
-        bootstrap().then(() => renderWallet());
+        state.depositStep = 5;
+        showDepositStep(5);
       } else {
         alert(result.error || 'Deposit failed');
       }
     } catch (error) {
       alert('Deposit failed: ' + error.message);
     }
+  });
+
+  // Deposit Step 5: Done
+  document.getElementById('deposit-step-5-done')?.addEventListener('click', () => {
+    document.getElementById('deposit-form-section').style.display = 'none';
+    state.depositStep = 0;
+    state.depositData = {};
+    bootstrap().then(() => renderWallet());
+  });
+
+  // Withdrawal Step 0: Enter Amount
+  document.getElementById('withdraw-step-0-next')?.addEventListener('click', () => {
+    const amount = document.getElementById('withdraw-amount').value;
+    if (!amount || Number(amount) < 500) {
+      alert('Please enter a valid amount (minimum 500 ETB)');
+      return;
+    }
+    if (Number(amount) > wallet.balance) {
+      alert('Withdrawal amount cannot exceed available balance');
+      return;
+    }
+    state.withdrawData.amount = Number(amount);
+    state.withdrawStep = 1;
+    showWithdrawStep(1);
+  });
+
+  // Withdrawal Step 1: Select Payment Method
+  document.getElementById('withdraw-step-1-back')?.addEventListener('click', () => {
+    state.withdrawStep = 0;
+    showWithdrawStep(0);
+  });
+
+  document.getElementById('withdraw-step-1-next')?.addEventListener('click', () => {
+    const paymentMethod = document.getElementById('withdraw-payment-method').value;
+    if (!paymentMethod) {
+      alert('Please select a payment method');
+      return;
+    }
+    state.withdrawData.paymentMethod = paymentMethod;
+    state.withdrawStep = 2;
+    showWithdrawStep(2);
+  });
+
+  // Withdrawal Step 2: Enter Required Details
+  document.getElementById('withdraw-step-2-back')?.addEventListener('click', () => {
+    state.withdrawStep = 1;
+    showWithdrawStep(1);
+  });
+
+  document.getElementById('withdraw-step-2-next')?.addEventListener('click', () => {
+    const accountName = document.getElementById('withdraw-account-name').value;
+    const accountNumber = document.getElementById('withdraw-account-number').value;
+
+    if (!accountName || !accountNumber) {
+      alert('Account name and account number are required');
+      return;
+    }
+
+    state.withdrawData.accountName = accountName;
+    state.withdrawData.accountNumber = accountNumber;
+    state.withdrawData.bankName = document.getElementById('withdraw-bank-name').value;
+    state.withdrawStep = 3;
+    showWithdrawStep(3);
+  });
+
+  // Withdrawal Step 3: Review Details
+  document.getElementById('withdraw-step-3-back')?.addEventListener('click', () => {
+    state.withdrawStep = 2;
+    showWithdrawStep(2);
+  });
+
+  document.getElementById('withdraw-step-3-next')?.addEventListener('click', () => {
+    state.withdrawStep = 4;
+    showWithdrawStep(4);
+  });
+
+  // Withdrawal Step 4: Confirm Withdrawal
+  document.getElementById('withdraw-step-4-back')?.addEventListener('click', () => {
+    state.withdrawStep = 3;
+    showWithdrawStep(3);
+  });
+
+  document.getElementById('withdraw-step-4-confirm')?.addEventListener('click', async () => {
+    const data = {
+      amount: state.withdrawData.amount,
+      paymentDetails: {
+        paymentMethod: state.withdrawData.paymentMethod,
+        accountName: state.withdrawData.accountName,
+        accountNumber: state.withdrawData.accountNumber,
+        bankName: state.withdrawData.bankName,
+      },
+    };
+
+    try {
+      const response = await fetch('/api/wallet/withdraw', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(data),
+      });
+      const result = await response.json();
+      if (response.ok) {
+        state.withdrawStep = 5;
+        showWithdrawStep(5);
+      } else {
+        alert(result.error || 'Withdrawal failed');
+      }
+    } catch (error) {
+      alert('Withdrawal failed: ' + error.message);
+    }
+  });
+
+  // Withdrawal Step 5: Done
+  document.getElementById('withdraw-step-5-done')?.addEventListener('click', () => {
+    document.getElementById('withdraw-form-section').style.display = 'none';
+    state.withdrawStep = 0;
+    state.withdrawData = {};
+    bootstrap().then(() => renderWallet());
   });
 
   document.getElementById('withdraw-form')?.addEventListener('submit', async (e) => {
@@ -1060,7 +1508,7 @@ function renderDashboard() {
       <section class="hero">
         <div class="eyebrow">Player dashboard</div>
         <h1>Please log in to view your rounds.</h1>
-        <p class="muted">Use the seeded demo player or create a new account.</p>
+        <p class="muted">Create an account to get started.</p>
         <div class="hero-actions"><a class="primary-btn" href="/login">Go to login</a></div>
       </section>
     `;
@@ -1542,7 +1990,7 @@ function renderAdmin() {
         <form class="form" id="payment-method-form">
           <div class="row">
             <div class="field"><label>Name</label><input name="name" placeholder="Bank Transfer" required /></div>
-            <div class="field"><label>Account name</label><input name="accountName" placeholder="TikWheel Demo Account" required /></div>
+            <div class="field"><label>Account name</label><input name="accountName" placeholder="TikWheel Account" required /></div>
           </div>
           <div class="row">
             <div class="field"><label>Account number</label><input name="accountNumber" placeholder="000-000-0000" required /></div>

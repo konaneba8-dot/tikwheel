@@ -7,6 +7,44 @@ export const SESSION_SECRET = process.env.TIKWHEEL_SESSION_SECRET || 'tikwheel-d
 export const DEFAULT_ENTRY_LOCK_MINUTES = 15;
 export const DEFAULT_COMPLIANCE_MODE = 'demo';
 
+// OAuth Configuration
+export const OAUTH_CONFIG = {
+  google: {
+    clientId: process.env.GOOGLE_CLIENT_ID || '',
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+    redirectUri: process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3000/auth/callback/google',
+    scope: 'profile email',
+  },
+  facebook: {
+    clientId: process.env.FACEBOOK_CLIENT_ID || '',
+    clientSecret: process.env.FACEBOOK_CLIENT_SECRET || '',
+    redirectUri: process.env.FACEBOOK_REDIRECT_URI || 'http://localhost:3000/auth/callback/facebook',
+    scope: 'email public_profile',
+  },
+  instagram: {
+    clientId: process.env.INSTAGRAM_CLIENT_ID || '',
+    clientSecret: process.env.INSTAGRAM_CLIENT_SECRET || '',
+    redirectUri: process.env.INSTAGRAM_REDIRECT_URI || 'http://localhost:3000/auth/callback/instagram',
+    scope: 'user_profile',
+  },
+  tiktok: {
+    clientId: process.env.TIKTOK_CLIENT_ID || '',
+    clientSecret: process.env.TIKTOK_CLIENT_SECRET || '',
+    redirectUri: process.env.TIKTOK_REDIRECT_URI || 'http://localhost:3000/auth/callback/tiktok',
+    scope: 'user.info.basic',
+  },
+  twitter: {
+    clientId: process.env.TWITTER_CLIENT_ID || '',
+    clientSecret: process.env.TWITTER_CLIENT_SECRET || '',
+    redirectUri: process.env.TWITTER_REDIRECT_URI || 'http://localhost:3000/auth/callback/twitter',
+    scope: 'tweet.read users.read',
+  },
+  telegram: {
+    botToken: process.env.TELEGRAM_BOT_TOKEN || '',
+    redirectUri: process.env.TELEGRAM_REDIRECT_URI || 'http://localhost:3000/auth/callback/telegram',
+  },
+};
+
 export function getStorageMode() {
   const configuredMode = (process.env.TIKWHEEL_STORAGE_BACKEND || '').trim().toLowerCase();
   if (configuredMode === 'mysql') return 'mysql';

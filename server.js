@@ -2,7 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PORT, SESSION_COOKIE } from './src/config.js';
+import { PORT, SESSION_COOKIE, OAUTH_CONFIG } from './src/config.js';
 import { parseCookies, serializeCookie, verifySignedToken } from './src/lib/security.js';
 import {
   approveUserVerification,
@@ -11,6 +11,7 @@ import {
   changeRoundStatus,
   completeDraw,
   completeDeposit,
+  completeSocialSignup,
   createDeposit,
   createGameTypeAction,
   createLiveBroadcast,
@@ -123,7 +124,7 @@ async function handlePage(req, res, url) {
   if (url.pathname === '/login') {
     html = renderLoginPage({
       user,
-      content: `<section class="hero"><div class="eyebrow">Login</div><h1>Access your TikWheel account.</h1><p class="muted">Use the seeded demo credentials or register a new player account.</p></section>`,
+      content: `<section class="hero"><div class="eyebrow">Login</div><h1>Access your TikWheel account.</h1><p class="muted">Register a new player account to get started.</p></section>`,
     });
   } else if (url.pathname === '/terms') {
     html = renderTermsPage({
@@ -344,6 +345,12 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: true });
   }
 
+  if (req.method === 'POST' && url.pathname === '/api/auth/social-signup') {
+    const result = await completeSocialSignup(body || {});
+    setAuthCookie(res, result.token);
+    return sendJson(res, 200, { user: result.user });
+  }
+
   if (req.method === 'POST' && url.pathname === '/api/admin/game-types') {
     return sendJson(res, 200, await createGameTypeAction(body || {}, user));
   }
@@ -448,6 +455,33 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, await rejectUserVerification(userId, body?.reason || 'Verification rejected', user));
   }
 
+  // OAuth callback handlers
+  const oauthCallbackMatch = url.pathname.match(/^\/auth\/callback\/([^/]+)$/);
+  if (oauthCallbackMatch) {
+    const provider = decodeURIComponent(oauthCallbackMatch[1]);
+    return handleOAuthCallback(req, res, url, provider);
+  }
+
+  // OAuth initiation endpoints
+  if (req.method === 'GET' && url.pathname === '/auth/google') {
+    return initiateOAuth(req, res, 'google');
+  }
+  if (req.method === 'GET' && url.pathname === '/auth/facebook') {
+    return initiateOAuth(req, res, 'facebook');
+  }
+  if (req.method === 'GET' && url.pathname === '/auth/instagram') {
+    return initiateOAuth(req, res, 'instagram');
+  }
+  if (req.method === 'GET' && url.pathname === '/auth/tiktok') {
+    return initiateOAuth(req, res, 'tiktok');
+  }
+  if (req.method === 'GET' && url.pathname === '/auth/twitter') {
+    return initiateOAuth(req, res, 'twitter');
+  }
+  if (req.method === 'GET' && url.pathname === '/auth/telegram') {
+    return initiateOAuth(req, res, 'telegram');
+  }
+
   if (req.method === 'PUT' && url.pathname === '/api/admin/financial-settings') {
     return sendJson(res, 200, await updateFinancialSettings(body || {}, user));
   }
@@ -550,4 +584,107 @@ async function readJsonBody(req) {
   const text = Buffer.concat(chunks).toString('utf8');
   if (!text.trim()) return {};
   return JSON.parse(text);
+}
+
+// OAuth Functions
+function initiateOAuth(req, res, provider) {
+  const config = OAUTH_CONFIG[provider];
+  if (!config || !config.clientId) {
+    return sendJson(res, 500, { error: `${provider} OAuth not configured` });
+  }
+
+  const authUrls = {
+    google: 'https://accounts.google.com/o/oauth2/v2/auth',
+    facebook: 'https://www.facebook.com/v18.0/dialog/oauth',
+    instagram: 'https://api.instagram.com/oauth/authorize',
+    tiktok: 'https://www.tiktok.com/v2/auth/authorize',
+    twitter: 'https://twitter.com/i/oauth2/authorize',
+    telegram: 'https://oauth.telegram.org/auth'
+  };
+
+  const state = Math.random().toString(36).substring(2, 15);
+  const authUrl = new URL(authUrls[provider]);
+
+  authUrl.searchParams.append('client_id', config.clientId);
+  authUrl.searchParams.append('redirect_uri', config.redirectUri);
+  authUrl.searchParams.append('scope', config.scope);
+  authUrl.searchParams.append('response_type', 'code');
+  authUrl.searchParams.append('state', state);
+
+  if (provider === 'telegram') {
+    // Telegram uses a different flow
+    authUrl.searchParams.append('bot_id', config.botToken);
+  }
+
+  res.writeHead(302, { Location: authUrl.toString() });
+  res.end();
+}
+
+async function handleOAuthCallback(req, res, url, provider) {
+  const code = url.searchParams.get('code');
+  const state = url.searchParams.get('state');
+  const error = url.searchParams.get('error');
+
+  if (error) {
+    return sendHtml(res, 400, `<h1>OAuth Error</h1><p>${escapeHtml(error)}</p>`);
+  }
+
+  if (!code) {
+    return sendHtml(res, 400, '<h1>OAuth Error</h1><p>No authorization code provided</p>');
+  }
+
+  try {
+    // This would exchange the code for an access token and get user info
+    // For now, redirect to registration with social info
+    const html = `
+      <html>
+        <head>
+          <title>Social Sign-up</title>
+          <style>
+            body { font-family: Arial, sans-serif; max-width: 500px; margin: 50px auto; padding: 20px; }
+            .form-group { margin-bottom: 15px; }
+            label { display: block; margin-bottom: 5px; }
+            input { width: 100%; padding: 8px; box-sizing: border-box; }
+            button { background: #007bff; color: white; padding: 10px 20px; border: none; cursor: pointer; }
+            button:hover { background: #0056b3; }
+          </style>
+        </head>
+        <body>
+          <h1>Social Sign-up Successful</h1>
+          <p>Connected with ${provider}</p>
+          <p>Please complete your registration with additional information.</p>
+          <form action="/api/auth/social-signup" method="POST">
+            <input type="hidden" name="provider" value="${provider}">
+            <input type="hidden" name="socialId" value="${code}">
+            <div class="form-group">
+              <label>Full Name:</label>
+              <input type="text" name="fullName" required>
+            </div>
+            <div class="form-group">
+              <label>Phone:</label>
+              <input type="tel" name="phone" required>
+            </div>
+            <div class="form-group">
+              <label>Location:</label>
+              <input type="text" name="location">
+            </div>
+            <button type="submit">Complete Registration</button>
+          </form>
+        </body>
+      </html>
+    `;
+    sendHtml(res, 200, html);
+  } catch (error) {
+    sendHtml(res, 500, `<h1>OAuth Error</h1><p>${escapeHtml(error.message)}</p>`);
+  }
+}
+
+function escapeHtml(text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }

@@ -660,6 +660,10 @@ export async function registerPlayer(input) {
       acceptedGameRulesVersion: state.meta.gameRulesVersion || '1.0',
       acceptedTermsAt: now(),
       acceptedGameRulesAt: now(),
+      // Social account information
+      socialAccounts: input.socialAccounts || {},
+      socialProvider: input.socialProvider || null,
+      socialId: input.socialId || null,
       createdAt: now(),
       updatedAt: now(),
     };
@@ -687,10 +691,8 @@ export async function login(input) {
   if (!user) throw new Error('Invalid credentials');
   if (!verifyPassword(password, user.salt, user.passwordHash)) throw new Error('Invalid credentials');
 
-  // Check verification status for players
-  if (user.role === ROLES.PLAYER && user.verificationStatus !== USER_VERIFICATION_STATUSES.VERIFIED) {
-    throw new Error('Account pending verification. Please wait for admin approval.');
-  }
+  // Allow users with pending verification to log in - verification happens later via admin
+  // No verification check at login - account is created immediately with Pending Verification status
 
   await mutateState((draft) => {
     appendAudit(
@@ -705,6 +707,72 @@ export async function login(input) {
     );
   });
   return { user: publicUser(user), token: createSignedToken({ userId: user.id, role: user.role }) };
+}
+
+export async function completeSocialSignup(input) {
+  return mutateState((state) => {
+    const fullName = String(input.fullName || '').trim();
+    const phone = String(input.phone || '').trim();
+    const location = String(input.location || '').trim() || null;
+    const provider = String(input.provider || '').trim();
+    const socialId = String(input.socialId || '').trim();
+
+    if (!fullName || !phone) throw new Error('Name and phone are required');
+    if (!provider) throw new Error('Social provider is required');
+
+    // Check if user already exists with this social account
+    const existingUser = state.users.find((user) =>
+      user.socialProvider === provider && user.socialId === socialId
+    );
+
+    if (existingUser) {
+      // User already exists, log them in
+      return { user: publicUser(existingUser), token: createSignedToken({ userId: existingUser.id, role: existingUser.role }) };
+    }
+
+    // Check if phone already exists
+    if (state.users.some((user) => user.phone === phone)) throw new Error('Phone already exists');
+
+    // Generate a random password for social sign-up users
+    const { hash, salt } = hashPassword(crypto.randomUUID());
+
+    const user = {
+      id: `usr_${crypto.randomUUID()}`,
+      role: ROLES.PLAYER,
+      fullName,
+      phone,
+      email: null,
+      passwordHash: hash,
+      salt,
+      location,
+      verificationStatus: USER_VERIFICATION_STATUSES.PENDING_VERIFICATION,
+      acceptedTermsVersion: state.meta.termsVersion || '1.0',
+      acceptedGameRulesVersion: state.meta.gameRulesVersion || '1.0',
+      acceptedTermsAt: now(),
+      acceptedGameRulesAt: now(),
+      socialAccounts: { [provider]: { id: socialId, connectedAt: now() } },
+      socialProvider: provider,
+      socialId: socialId,
+      createdAt: now(),
+      updatedAt: now(),
+    };
+
+    state.users.push(user);
+    appendAudit(
+      state,
+      createAuditEntry({
+        actorUserId: user.id,
+        actorRole: user.role,
+        action: AUDIT_ACTIONS.USER_REGISTERED,
+        entityType: 'USER',
+        entityId: user.id,
+        after: publicUser(user),
+        metadata: { socialProvider: provider, socialSignup: true },
+      }),
+    );
+
+    return { user: publicUser(user), token: createSignedToken({ userId: user.id, role: user.role }) };
+  });
 }
 
 export async function resolveUserFromCookie(cookieValue) {
@@ -1237,6 +1305,14 @@ export async function getWalletDashboard(user) {
 export async function createDeposit(input, actor) {
   requireRole(actor, ROLES.PLAYER);
   return mutateState((state) => {
+    const user = state.users.find((u) => u.id === actor.id);
+    if (!user) throw new Error('User not found');
+
+    // Check if user is verified before allowing deposit
+    if (user.verificationStatus !== USER_VERIFICATION_STATUSES.VERIFIED) {
+      throw new Error('Account must be verified before making deposits. Please wait for admin approval.');
+    }
+
     const wallet = getUserWallet(state, actor.id);
 
     // Make referral number optional
@@ -1250,8 +1326,21 @@ export async function createDeposit(input, actor) {
       throw new Error('ID document upload is required for deposit verification');
     }
 
+    // Require payment receipt
+    if (!input.paymentDetails?.receiptUrl) {
+      throw new Error('Payment receipt upload is required');
+    }
+
+    // Validate receipt file type (PDF, JPG, JPEG, PNG only)
+    const receiptUrl = String(input.paymentDetails.receiptUrl).toLowerCase();
+    const validExtensions = ['.pdf', '.jpg', '.jpeg', '.png'];
+    const hasValidExtension = validExtensions.some(ext => receiptUrl.endsWith(ext));
+    if (!hasValidExtension) {
+      throw new Error('Payment receipt must be PDF, JPG, JPEG, or PNG format only');
+    }
+
     paymentDetails.idDocumentUrl = input.paymentDetails.idDocumentUrl;
-    paymentDetails.receiptUrl = input.paymentDetails.receiptUrl || null;
+    paymentDetails.receiptUrl = input.paymentDetails.receiptUrl;
 
     const transaction = createDepositTransaction(actor.id, input.amount, input.paymentMethod, paymentDetails);
     state.transactions = state.transactions || [];
@@ -1318,6 +1407,14 @@ export async function rejectDeposit(transactionId, reason, actor) {
 export async function createWithdrawal(input, actor) {
   requireRole(actor, ROLES.PLAYER);
   return mutateState((state) => {
+    const user = state.users.find((u) => u.id === actor.id);
+    if (!user) throw new Error('User not found');
+
+    // Check if user is verified before allowing withdrawal
+    if (user.verificationStatus !== USER_VERIFICATION_STATUSES.VERIFIED) {
+      throw new Error('Account must be verified before making withdrawals. Please wait for admin approval.');
+    }
+
     const wallet = getUserWallet(state, actor.id);
     validateWithdrawalRequest(input.amount, wallet.balance);
     const transaction = createWithdrawalTransaction(actor.id, input.amount, input.paymentDetails);

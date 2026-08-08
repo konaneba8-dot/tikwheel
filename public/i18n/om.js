@@ -58,7 +58,7 @@ export const om = {
     'View live round': 'Maragaa biraa ilaali',
     'Access': 'Ga’eessuu',
     'Login or register to join rounds.': 'Maragaa galuuuf seeni ykn galmaa’i.',
-    'Demo users:': 'Fayyadamaa demo:',
+    'Demo users:': 'Akkaawunti uumuu jalqabuf:',
     'General Terms': 'Waliigalaalee Waliigalaa',
     'Game rules': 'Seerota taphaa',
     'Important notice': 'Beeksisa barbaachisaa',

@@ -58,7 +58,7 @@ export const ti = {
     'View live round': 'ቀጥታ ዙርያ ርአ',
     'Access': 'ክፍት ምድረታ',
     'Login or register to join rounds.': 'ንመቀላቀል እቶ ወይ ተመዝግብ።',
-    'Demo users:': 'ኣተራርያ ተጠቃሚታት:',
+    'Demo users:': 'ለመጀመር ምዝግባ ይፈጽሙ:',
     'General Terms': 'ሓፈሻዊ ኩነታት',
     'Game rules': 'ሕገ ጨዋታ',
     'Important notice': 'ካብ ምልክት እንቅርታ',
