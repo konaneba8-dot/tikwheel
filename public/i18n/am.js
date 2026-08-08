@@ -28,7 +28,7 @@ export const am = {
     'Reference': 'ማጣቀሻ',
     'Entry': 'ግቤት',
     'players': 'ተጫዋቾች',
-    'Demo / Test Mode': 'TikWheel',
+    'TikWheel': 'TikWheel',
     'Dynamic live wheels with backend-selected winners.': 'በስርዓት ውስጥ የተመረጡ አሸናፊዎች ያሉት ተለዋዋጭ ቀጥታ ጎማዎች።',
     'Open Live Screen': 'ቀጥታ ማያ ክፈት',
     'Winner History': 'የአሸናፊ ታሪክ',

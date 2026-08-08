@@ -1,9 +1,11 @@
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { PORT, SESSION_COOKIE, OAUTH_CONFIG } from './src/config.js';
 import { parseCookies, serializeCookie, verifySignedToken } from './src/lib/security.js';
+import formidable from 'formidable';
 import {
   approveUserVerification,
   approveWithdrawal,
@@ -80,7 +82,8 @@ function startServer(port) {
         url.pathname === '/styles.css' ||
         url.pathname === '/app.js' ||
         url.pathname === '/live-broadcast.js' ||
-        url.pathname.startsWith('/i18n/')
+        url.pathname.startsWith('/i18n/') ||
+        url.pathname.startsWith('/uploads/')
       ) {
         await serveStatic(url.pathname.slice(1), res);
         return;
@@ -349,6 +352,11 @@ async function handleApi(req, res, url) {
     const result = await completeSocialSignup(body || {});
     setAuthCookie(res, result.token);
     return sendJson(res, 200, { user: result.user });
+  }
+
+  // File upload endpoint for receipts
+  if (req.method === 'POST' && url.pathname === '/api/upload/receipt') {
+    return handleFileUpload(req, res);
   }
 
   if (req.method === 'POST' && url.pathname === '/api/admin/game-types') {
@@ -687,4 +695,50 @@ function escapeHtml(text) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+async function handleFileUpload(req, res) {
+  const user = await currentUser(req);
+  if (!user) {
+    return sendJson(res, 401, { error: 'Authentication required' });
+  }
+
+  try {
+    const form = formidable({
+      maxFileSize: 10 * 1024 * 1024, // 10MB
+      keepExtensions: true,
+      uploadDir: path.join(__dirname, 'public', 'uploads'),
+    });
+
+    const [fields, files] = await form.parse(req);
+    const file = files.file?.[0];
+
+    if (!file) {
+      return sendJson(res, 400, { error: 'No file uploaded' });
+    }
+
+    // Validate file type
+    const validExtensions = ['.pdf', '.jpg', '.jpeg', '.png'];
+    const fileExtension = path.extname(file.originalFilename || '').toLowerCase();
+
+    if (!validExtensions.includes(fileExtension)) {
+      // Delete the uploaded file
+      await fs.unlink(file.filepath).catch(() => { });
+      return sendJson(res, 400, { error: 'Invalid file type. Only PDF, JPG, JPEG, PNG allowed' });
+    }
+
+    // Generate a unique filename
+    const uniqueFilename = `${Date.now()}-${crypto.randomUUID()}${fileExtension}`;
+    const finalPath = path.join(__dirname, 'public', 'uploads', uniqueFilename);
+
+    // Move/rename the file
+    await fs.rename(file.filepath, finalPath);
+
+    // Return the URL
+    const fileUrl = `/uploads/${uniqueFilename}`;
+    return sendJson(res, 200, { url: fileUrl, filename: uniqueFilename });
+  } catch (error) {
+    console.error('File upload error:', error);
+    return sendJson(res, 500, { error: 'File upload failed: ' + error.message });
+  }
 }

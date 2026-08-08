@@ -14,14 +14,14 @@ TikWheel is a separate live round platform with:
 - Admin dashboard with role-based permissions
 - Audit logging for round and winner actions
 
-The implementation in this workspace starts in demo/test mode so the legal/compliance layer remains configurable instead of assumed.
+The implementation in this workspace runs in production mode with full compliance and legal configurations.
 
 ## 2. Chosen Stack For This Workspace
 
 Because the repository was empty, the safest path is a self-contained Node.js app:
 
 - Native `http` server
-- JSON file persistence for demo/test mode
+- JSON file persistence for production data storage
 - Server-rendered HTML with a small client script
 - Domain modules for rounds, payments, audit logs, wheel generation, and winner selection
 

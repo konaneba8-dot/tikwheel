@@ -3,9 +3,9 @@ export const PORT = Number(process.env.PORT || 3000);
 export const DATA_DIR = new URL('../data/', import.meta.url);
 export const STATE_FILE = new URL('../data/state.json', import.meta.url);
 export const SESSION_COOKIE = 'tikwheel_session';
-export const SESSION_SECRET = process.env.TIKWHEEL_SESSION_SECRET || 'tikwheel-demo-secret-change-me';
+export const SESSION_SECRET = process.env.TIKWHEEL_SESSION_SECRET || 'tikwheel-production-secret-change-in-production';
 export const DEFAULT_ENTRY_LOCK_MINUTES = 15;
-export const DEFAULT_COMPLIANCE_MODE = 'demo';
+export const DEFAULT_COMPLIANCE_MODE = 'production';
 
 // OAuth Configuration
 export const OAUTH_CONFIG = {

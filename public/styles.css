@@ -968,3 +968,48 @@ textarea {
   border-color: #0088cc;
   background: rgba(0, 136, 204, 0.1);
 }
+
+/* File Upload Styles */
+.file-upload-area {
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  padding: 30px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  background: var(--panel);
+}
+
+.file-upload-area:hover {
+  border-color: var(--accent);
+  background: var(--panel-strong);
+}
+
+.file-upload-area.dragover {
+  border-color: var(--accent);
+  background: rgba(0, 229, 255, 0.1);
+  transform: scale(1.02);
+}
+
+.file-upload-content {
+  pointer-events: none;
+}
+
+.file-upload-icon {
+  font-size: 48px;
+  margin-bottom: 15px;
+}
+
+.file-upload-area p {
+  margin: 5px 0;
+  color: var(--text);
+}
+
+.file-upload-area .muted {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.file-upload-area .small {
+  font-size: 12px;
+}

@@ -204,7 +204,9 @@ function showDepositStep(step) {
     document.getElementById('review-deposit-amount').textContent = state.depositData.amount;
     const paymentMethod = state.bootstrap.paymentMethods.find(pm => pm.id === state.depositData.paymentMethod);
     document.getElementById('review-deposit-method').textContent = paymentMethod ? paymentMethod.name : state.depositData.paymentMethod;
-    document.getElementById('review-deposit-receipt').textContent = state.depositData.receiptUrl;
+    // Show file name instead of URL
+    const fileName = state.depositData.receiptFile ? state.depositData.receiptFile.name : 'Receipt uploaded';
+    document.getElementById('review-deposit-receipt').textContent = fileName;
   }
 }
 
@@ -1072,12 +1074,20 @@ function renderWallet() {
           <p class="muted">Step 4 of 6: Upload Payment Receipt</p>
           <div class="field">
             <label>Payment Receipt (Required)</label>
-            <input id="deposit-receipt-url" type="url" required placeholder="Upload payment receipt (PDF, JPG, JPEG, PNG only)" />
-            <small class="muted">Payment receipt must be PDF, JPG, JPEG, or PNG format only</small>
-          </div>
-          <div id="deposit-receipt-preview" style="display: none; margin-top: 10px;">
-            <strong>Receipt Preview:</strong>
-            <div id="deposit-receipt-preview-content"></div>
+            <div id="deposit-receipt-upload" class="file-upload-area">
+              <div class="file-upload-content">
+                <div class="file-upload-icon">📁</div>
+                <p>Drag and drop your receipt here</p>
+                <p class="muted">or click to browse</p>
+                <p class="small muted">PDF, JPG, JPEG, PNG only</p>
+              </div>
+              <input type="file" id="deposit-receipt-file" accept=".pdf,.jpg,.jpeg,.png" style="display: none;" />
+            </div>
+            <div id="deposit-receipt-preview" style="display: none; margin-top: 10px;">
+              <strong>Selected File:</strong>
+              <div id="deposit-receipt-preview-content"></div>
+              <button class="ghost-btn" id="deposit-receipt-remove" style="margin-top: 5px;">Remove</button>
+            </div>
           </div>
           <button class="ghost-btn" id="deposit-step-3-back">Back</button>
           <button class="primary-btn" id="deposit-step-3-next">Next</button>
@@ -1279,37 +1289,130 @@ function renderWallet() {
     showDepositStep(2);
   });
 
-  document.getElementById('deposit-receipt-url')?.addEventListener('input', (e) => {
-    const receiptUrl = e.target.value;
-    const preview = document.getElementById('deposit-receipt-preview');
-    const previewContent = document.getElementById('deposit-receipt-preview-content');
+  // File upload functionality
+  const fileUploadArea = document.getElementById('deposit-receipt-upload');
+  const fileInput = document.getElementById('deposit-receipt-file');
+  const receiptPreview = document.getElementById('deposit-receipt-preview');
+  const receiptPreviewContent = document.getElementById('deposit-receipt-preview-content');
+  const receiptRemoveBtn = document.getElementById('deposit-receipt-remove');
 
-    if (receiptUrl) {
-      preview.style.display = 'block';
-      previewContent.innerHTML = `<a href="${escapeHtml(receiptUrl)}" target="_blank">${escapeHtml(receiptUrl)}</a>`;
-    } else {
-      preview.style.display = 'none';
+  // Click to browse
+  fileUploadArea?.addEventListener('click', () => {
+    fileInput.click();
+  });
+
+  // File selection
+  fileInput?.addEventListener('change', (e) => {
+    handleFileSelect(e.target.files[0]);
+  });
+
+  // Drag and drop
+  fileUploadArea?.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    fileUploadArea.classList.add('dragover');
+  });
+
+  fileUploadArea?.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    fileUploadArea.classList.remove('dragover');
+  });
+
+  fileUploadArea?.addEventListener('drop', (e) => {
+    e.preventDefault();
+    fileUploadArea.classList.remove('dragover');
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      handleFileSelect(files[0]);
     }
   });
 
-  document.getElementById('deposit-step-3-next')?.addEventListener('click', () => {
-    const receiptUrl = document.getElementById('deposit-receipt-url').value;
-    if (!receiptUrl) {
-      alert('Payment receipt is required');
-      return;
-    }
+  // Remove file
+  receiptRemoveBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    clearFileSelection();
+  });
+
+  function handleFileSelect(file) {
+    if (!file) return;
 
     // Validate file type
+    const validTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
     const validExtensions = ['.pdf', '.jpg', '.jpeg', '.png'];
-    const hasValidExtension = validExtensions.some(ext => receiptUrl.toLowerCase().endsWith(ext));
-    if (!hasValidExtension) {
+    const fileExtension = '.' + file.name.split('.').pop().toLowerCase();
+
+    if (!validTypes.includes(file.type) && !validExtensions.includes(fileExtension)) {
       alert('Payment receipt must be PDF, JPG, JPEG, or PNG format only');
       return;
     }
 
-    state.depositData.receiptUrl = receiptUrl;
-    state.depositStep = 4;
-    showDepositStep(4);
+    // Validate file size (max 10MB)
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (file.size > maxSize) {
+      alert('File size must be less than 10MB');
+      return;
+    }
+
+    state.depositData.receiptFile = file;
+
+    // Show preview
+    receiptPreview.style.display = 'block';
+    receiptPreviewContent.innerHTML = `
+      <div class="notice">
+        <strong>${escapeHtml(file.name)}</strong>
+        <div class="small muted">${formatFileSize(file.size)}</div>
+        <div class="small muted">${file.type || 'Unknown type'}</div>
+      </div>
+    `;
+
+    // Hide upload area
+    fileUploadArea.style.display = 'none';
+  }
+
+  function clearFileSelection() {
+    state.depositData.receiptFile = null;
+    fileInput.value = '';
+    receiptPreview.style.display = 'none';
+    fileUploadArea.style.display = 'block';
+  }
+
+  function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+  }
+
+  document.getElementById('deposit-step-3-next')?.addEventListener('click', async () => {
+    if (!state.depositData.receiptFile) {
+      alert('Payment receipt is required');
+      return;
+    }
+
+    // Upload file first
+    try {
+      const formData = new FormData();
+      formData.append('file', state.depositData.receiptFile);
+
+      const uploadResponse = await fetch('/api/upload/receipt', {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+      });
+
+      if (!uploadResponse.ok) {
+        const error = await uploadResponse.json();
+        throw new Error(error.error || 'File upload failed');
+      }
+
+      const uploadResult = await uploadResponse.json();
+      state.depositData.receiptUrl = uploadResult.url;
+
+      state.depositStep = 4;
+      showDepositStep(4);
+    } catch (error) {
+      alert('File upload failed: ' + error.message);
+    }
   });
 
   // Deposit Step 4: Review Details
