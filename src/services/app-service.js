@@ -645,17 +645,21 @@ export async function registerPlayer(input) {
     if (state.users.some((user) => user.phone === phone)) throw new Error('Phone already exists');
     if (email && state.users.some((user) => user.email === email)) throw new Error('Email already exists');
 
+    // If this is the first user, make them a SUPER_ADMIN for initial setup
+    const isFirstUser = state.users.length === 0;
+    const role = isFirstUser ? ROLES.SUPER_ADMIN : ROLES.PLAYER;
+
     const { hash, salt } = hashPassword(password);
     const user = {
       id: `usr_${crypto.randomUUID()}`,
-      role: ROLES.PLAYER,
+      role,
       fullName,
       phone,
       email,
       passwordHash: hash,
       salt,
       location: String(input.location || '').trim() || null,
-      verificationStatus: USER_VERIFICATION_STATUSES.PENDING_VERIFICATION,
+      verificationStatus: isFirstUser ? USER_VERIFICATION_STATUSES.VERIFIED : USER_VERIFICATION_STATUSES.PENDING_VERIFICATION,
       acceptedTermsVersion: state.meta.termsVersion || '1.0',
       acceptedGameRulesVersion: state.meta.gameRulesVersion || '1.0',
       acceptedTermsAt: now(),
@@ -677,6 +681,7 @@ export async function registerPlayer(input) {
         entityType: 'USER',
         entityId: user.id,
         after: publicUser(user),
+        metadata: { isFirstUser, initialSetup: isFirstUser },
       }),
     );
     return { user: publicUser(user), token: createSignedToken({ userId: user.id, role: user.role }) };

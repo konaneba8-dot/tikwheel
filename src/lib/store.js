@@ -16,48 +16,30 @@ function createId(prefix) {
   return `${prefix}_${crypto.randomUUID()}`;
 }
 
-function seededGameTypes() {
-  // No seeded game types for production - will be configured by admin
+function initializeGameTypes() {
+  // No game types for production - will be configured by admin
   return [];
 }
 
-function seedUsers() {
-  const superAdminPass = hashPassword('SuperAdmin123!');
-  return [
-    {
-      id: createId('usr'),
-      role: ROLES.SUPER_ADMIN,
-      fullName: 'Super Admin',
-      phone: '+251911234567',
-      email: 'konaneba8@gmail.com',
-      passwordHash: superAdminPass.hash,
-      salt: superAdminPass.salt,
-      location: 'Addis Ababa',
-      verificationStatus: USER_VERIFICATION_STATUSES.VERIFIED,
-      acceptedTermsVersion: '1.0',
-      acceptedGameRulesVersion: '1.0',
-      acceptedTermsAt: now(),
-      acceptedGameRulesAt: now(),
-      createdAt: now(),
-      updatedAt: now(),
-    },
-  ];
-}
-
-function seedRounds(gameTypes, users) {
-  // No seeded rounds for production - rounds will be created by admin
+function initializeUsers() {
+  // No admin accounts for production - first admin must be created manually
   return [];
 }
 
-function seedPaymentMethods() {
-  // No seeded payment methods for production - will be configured by admin
+function initializeRounds(gameTypes, users) {
+  // No rounds for production - rounds will be created by admin
+  return [];
+}
+
+function initializePaymentMethods() {
+  // No payment methods for production - will be configured by admin
   return [];
 }
 
 export function defaultState() {
-  const users = seedUsers();
-  const gameTypes = seededGameTypes();
-  const rounds = seedRounds(gameTypes, users);
+  const users = initializeUsers();
+  const gameTypes = initializeGameTypes();
+  const rounds = initializeRounds(gameTypes, users);
 
   return {
     meta: {
@@ -71,7 +53,7 @@ export function defaultState() {
     },
     users,
     gameTypes,
-    paymentMethods: seedPaymentMethods(),
+    paymentMethods: initializePaymentMethods(),
     rounds,
     auditLog: [],
     liveBroadcasts: [],

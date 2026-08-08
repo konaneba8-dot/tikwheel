@@ -1736,7 +1736,7 @@ function renderAdmin() {
       <section class="hero">
         <div class="eyebrow">Admin access required</div>
         <h1>Login as an admin to manage rounds.</h1>
-        <p class="muted">Seeded admin: <strong>admin@tikwheel.local / Admin123!</strong></p>
+        <p class="muted">${translate('Contact administrator for credentials:')}</p>
       </section>
     `;
     return;

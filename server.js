@@ -127,7 +127,7 @@ async function handlePage(req, res, url) {
   if (url.pathname === '/login') {
     html = renderLoginPage({
       user,
-      content: `<section class="hero"><div class="eyebrow">Login</div><h1>Access your TikWheel account.</h1><p class="muted">Register a new player account to get started.</p></section>`,
+      content: `<section class="hero"><div class="eyebrow">Login</div><h1>Access your TikWheel account.</h1><p class="muted">Register a new account to get started. The first registered user will become the system administrator.</p></section>`,
     });
   } else if (url.pathname === '/terms') {
     html = renderTermsPage({
