@@ -25,8 +25,37 @@ bindLocalizedValidation();
 bootstrap().catch((error) => renderError(error));
 
 async function bootstrap() {
-  const response = await fetch('/api/bootstrap', { credentials: 'include' });
-  state.bootstrap = await response.json();
+  try {
+    const response = await fetch('/api/bootstrap', { credentials: 'include' });
+    if (!response.ok) {
+      throw new Error(`Bootstrap failed: ${response.status}`);
+    }
+    state.bootstrap = await response.json();
+
+    // Ensure bootstrap has required properties
+    if (!state.bootstrap) {
+      state.bootstrap = {
+        user: null,
+        rounds: [],
+        gameTypes: [],
+        paymentMethods: [],
+        winnerHistory: [],
+        activeGameTypes: [],
+        complianceMode: 'production',
+      };
+    }
+  } catch (error) {
+    console.error('Bootstrap error:', error);
+    state.bootstrap = {
+      user: null,
+      rounds: [],
+      gameTypes: [],
+      paymentMethods: [],
+      winnerHistory: [],
+      activeGameTypes: [],
+      complianceMode: 'production',
+    };
+  }
 
   if (page === 'live') {
     state.round = await loadRound(roundId || state.bootstrap.rounds?.[0]?.id);
@@ -470,7 +499,7 @@ function renderLogin() {
             <div class="field"><label>Password</label><input name="password" type="password" required /></div>
           </div>
           <div class="notice">
-            <small class="muted">Note: Your account will require admin verification before you can log in. This typically takes 24-48 hours.</small>
+            <small class="muted">Note: You can log in immediately after registration. Your account will be pending verification for deposits/withdrawals until approved by admin.</small>
           </div>
           <label class="checkbox-row">
             <input type="checkbox" name="acceptTerms" required />
