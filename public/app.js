@@ -1648,7 +1648,17 @@ function renderDashboard() {
   }
 
   if (!dashboard) {
-    app.innerHTML = `<section class="hero"><h1>No dashboard data available.</h1></section>`;
+    app.innerHTML = `
+      <section class="hero">
+        <div class="eyebrow">Player dashboard</div>
+        <h1>Welcome back, ${escapeHtml(user.fullName)}</h1>
+        <p class="muted">No active rounds available. Please check back later.</p>
+        <div class="hero-actions">
+          <a class="primary-btn" href="/wallet">Wallet</a>
+          <a class="ghost-btn" href="/history">History</a>
+        </div>
+      </section>
+    `;
     return;
   }
 

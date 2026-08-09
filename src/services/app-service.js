@@ -681,7 +681,7 @@ export async function registerPlayer(input) {
         entityType: 'USER',
         entityId: user.id,
         after: publicUser(user),
-        metadata: { isFirstUser, initialSetup: isFirstUser },
+        metadata: { isFirstUser, initialSetup: isFirstUser, message: isFirstUser ? 'First user automatically became SUPER_ADMIN' : 'Standard player registration' },
       }),
     );
     return { user: publicUser(user), token: createSignedToken({ userId: user.id, role: user.role }) };
@@ -738,19 +738,23 @@ export async function completeSocialSignup(input) {
     // Check if phone already exists
     if (state.users.some((user) => user.phone === phone)) throw new Error('Phone already exists');
 
+    // If this is the first user, make them a SUPER_ADMIN for initial setup
+    const isFirstUser = state.users.length === 0;
+    const role = isFirstUser ? ROLES.SUPER_ADMIN : ROLES.PLAYER;
+
     // Generate a random password for social sign-up users
     const { hash, salt } = hashPassword(crypto.randomUUID());
 
     const user = {
       id: `usr_${crypto.randomUUID()}`,
-      role: ROLES.PLAYER,
+      role,
       fullName,
       phone,
       email: null,
       passwordHash: hash,
       salt,
       location,
-      verificationStatus: USER_VERIFICATION_STATUSES.PENDING_VERIFICATION,
+      verificationStatus: isFirstUser ? USER_VERIFICATION_STATUSES.VERIFIED : USER_VERIFICATION_STATUSES.PENDING_VERIFICATION,
       acceptedTermsVersion: state.meta.termsVersion || '1.0',
       acceptedGameRulesVersion: state.meta.gameRulesVersion || '1.0',
       acceptedTermsAt: now(),
@@ -772,12 +776,17 @@ export async function completeSocialSignup(input) {
         entityType: 'USER',
         entityId: user.id,
         after: publicUser(user),
-        metadata: { socialProvider: provider, socialSignup: true },
+        metadata: { socialProvider: provider, socialSignup: true, isFirstUser, initialSetup: isFirstUser },
       }),
     );
 
     return { user: publicUser(user), token: createSignedToken({ userId: user.id, role: user.role }) };
   });
+}
+
+export async function getUserCount() {
+  const state = await readState();
+  return state.users?.length || 0;
 }
 
 export async function resolveUserFromCookie(cookieValue) {

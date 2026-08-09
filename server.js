@@ -52,6 +52,7 @@ import {
   trackPromotionEvent,
   updateFinancialSettings,
   verifyPayment,
+  getUserCount,
 } from './src/services/app-service.js';
 import { renderAdminPage, renderAuditPage, renderDashboardPage, renderGameRulesPage, renderHistoryDetailPage, renderHistoryPage, renderHomePage, renderLivePage, renderLivestreamPage, renderLoginPage, renderRoundPage, renderTermsPage, renderWalletPage } from './src/views/pages.js';
 
@@ -125,9 +126,11 @@ async function handlePage(req, res, url) {
   const user = await currentUser(req);
   let html;
   if (url.pathname === '/login') {
+    const userCount = await getUserCount();
+    const isAdminSetup = userCount > 0;
     html = renderLoginPage({
       user,
-      content: `<section class="hero"><div class="eyebrow">Login</div><h1>Access your TikWheel account.</h1><p class="muted">Register a new account to get started. The first registered user will become the system administrator.</p></section>`,
+      content: `<section class="hero"><div class="eyebrow">Login</div><h1>Access your TikWheel account.</h1><p class="muted">${isAdminSetup ? 'Login with your existing account.' : 'Register a new account to get started. The first registered user will become the system administrator.'}</p></section>`,
     });
   } else if (url.pathname === '/terms') {
     html = renderTermsPage({
@@ -175,13 +178,13 @@ async function handlePage(req, res, url) {
   } else if (url.pathname === '/dashboard') {
     html = renderDashboardPage({
       user,
-      content: `<section class="hero"><div class="eyebrow">Dashboard</div><h1>Your player workspace is loading...</h1></section>`,
+      content: `<section class="hero"><div class="eyebrow">Dashboard</div><h1>Your player workspace</h1></section>`,
     });
   } else if (url.pathname === '/live') {
     html = renderLivePage({
       user,
       roundId: url.searchParams.get('round') || '',
-      content: `<section class="hero"><div class="eyebrow">Live</div><h1>Loading round data...</h1></section>`,
+      content: `<section class="hero"><div class="eyebrow">Live</div><h1>Live rounds</h1></section>`,
     });
   } else if (url.pathname.startsWith('/rounds/')) {
     html = renderRoundPage({
