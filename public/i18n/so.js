@@ -130,7 +130,7 @@ export const so = {
     'No winning entries yet.': 'Weligaas ma jiro gelitaan guuleystay.',
     'Admin access required': 'Helitaan maamule ah ayaa loo baahan yahay',
     'Login as an admin to manage rounds.': 'Soo gal maamulaha si aad u maamusho wareegyada.',
-    'Raagi maamulaha:',
+
     'Admin dashboard': 'Dashboard-ka maamulaha',
     'Manage game types, rounds, payments, and draws.': 'Maamul noocyada ciyaarta, wareegyada, lacag bixinta iyo soo saarista.',
     'Every important action writes to the audit log.': 'Ficil kasta oo muhiim ah wuxuu galaa logga kormeerka.',
@@ -266,7 +266,7 @@ export const so = {
     'Enter rejection reason:': 'Geli sabab la diiday:',
     'Admin access required': 'Lahansho admin loo baahan yahay',
     'Login as an admin to manage rounds.': 'Soo gal sida admin si aad maamusho wareegyada.',
-    'Contact administrator for credentials:': 'Raagi maamulaha:',
+
     'Manage game types, rounds, payments, draws, and promotional campaigns.': 'Maamul noocyada ciyaarta, wareegyada, lacag bixinta, sawirka, iyo doorshooyinka daacmada.',
     'Every important action writes to the audit log.': 'Hawshada kasta ee muhiimka ah waxay ku qoranto logga kormeerka.',
     'Total rounds': 'Wareegyada wadnaha',

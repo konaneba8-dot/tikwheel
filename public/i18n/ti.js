@@ -130,7 +130,7 @@ export const ti = {
     'No winning entries yet.': 'እስካለም ምንም ኣሸናፊ ኣተራርያ የለን።',
     'Admin access required': 'የአስተዳዳሪ መዳረሻ ያስፈልጋል',
     'Login as an admin to manage rounds.': 'ንዙርያታት ኣስተዳዳሪ እቶ።',
-    'ኣስተዳዳሪን ይጠይ቉:',
+
     'Admin dashboard': 'ዳሽቦርድ ኣስተዳዳሪ',
     'Manage game types, rounds, payments, and draws.': 'ዓይነታት ጨዋታ፣ ዙርያታት፣ ክፍያታት እና ማሳያታት ኣስተዳደር።',
     'Every important action writes to the audit log.': 'እያንዳንዱ ኣስፈላጊ እርምጃ ወደ ኦዲት መዝገብ ይጻል።',
@@ -266,7 +266,7 @@ export const ti = {
     'Enter rejection reason:': 'ምክንያ ቀለው ያስገቡ:',
     'Admin access required': 'የአስተዳዳሪ መዳረሻ ያስፈልጋል',
     'Login as an admin to manage rounds.': 'ዙርያታት ኣስተዳደር እንደ አስተዳዳሪ እቶ።',
-    'ኣስተዳዳሪን ይጠይ቉:',
+
     'Manage game types, rounds, payments, draws, and promotional campaigns.': 'ዓይነታት ጨዋታ፣ ዙርያታት፣ ክፍያታት፣ ማሳያታት እና ዘመቻታት ዳያቂን ኣስተዳደር።',
     'Every important action writes to the audit log.': 'እያንዳንዱ ኣስፈላጊ እርምጃ ወደ ኦዲት መዝገብ ይጻል።',
     'Total rounds': 'ጠቅላላ ዙርያታት',
