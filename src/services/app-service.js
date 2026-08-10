@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { readState, writeState } from '../lib/store.js';
 import { hashPassword, verifyPassword, createSignedToken, verifySignedToken } from '../lib/security.js';
-import { ROLES, PAYMENT_STATUSES, ROUND_STATUSES, AUDIT_ACTIONS, USER_VERIFICATION_STATUSES, TRANSACTION_TYPES, TRANSACTION_STATUSES } from '../domain/statuses.js';
+import { ROLES, PAYMENT_STATUSES, ROUND_STATUSES, AUDIT_ACTIONS, USER_VERIFICATION_STATUSES, TRANSACTION_TYPES, TRANSACTION_STATUSES, NOTIFICATION_TYPES } from '../domain/statuses.js';
 import { createGameType, createRoundFromGameType, getGameType, listActiveGameTypes } from '../domain/game-types.js';
 import {
   attachReceipt,
@@ -49,8 +49,15 @@ import {
   updateBroadcastViewers,
   validateBroadcastPlatforms,
 } from '../domain/live-broadcast.js';
+
+const SUPER_ADMIN_EMAIL = 'konaneba8@gmail.com';
+
 function now() {
   return new Date().toISOString();
+}
+
+function canAssignSuperAdminRole(email) {
+  return String(email || '').toLowerCase().trim() === SUPER_ADMIN_EMAIL.toLowerCase();
 }
 
 function publicUser(user) {
@@ -63,6 +70,38 @@ function requireRole(user, roles) {
   if (!user) throw new Error('Authentication required');
   const allowed = Array.isArray(roles) ? roles : [roles];
   if (!allowed.includes(user.role)) throw new Error('Forbidden');
+}
+
+function requireSuperAdmin(user) {
+  requireRole(user, ROLES.SUPER_ADMIN);
+}
+
+function requireAdminOrSuperAdmin(user) {
+  requireRole(user, [ROLES.ADMIN, ROLES.SUPER_ADMIN]);
+}
+
+function requireMoneyAdminOrSuperAdmin(user) {
+  requireRole(user, [ROLES.MONEY_ADMIN, ROLES.SUPER_ADMIN]);
+}
+
+function requireGameAdminOrSuperAdmin(user) {
+  requireRole(user, [ROLES.GAME_ADMIN, ROLES.SUPER_ADMIN]);
+}
+
+function canManageUsers(user) {
+  return [ROLES.SUPER_ADMIN].includes(user.role);
+}
+
+function canManageFinances(user) {
+  return [ROLES.SUPER_ADMIN, ROLES.MONEY_ADMIN].includes(user.role);
+}
+
+function canManageGames(user) {
+  return [ROLES.SUPER_ADMIN, ROLES.GAME_ADMIN, ROLES.ADMIN].includes(user.role);
+}
+
+function canManagePaymentMethods(user) {
+  return [ROLES.SUPER_ADMIN, ROLES.ADMIN].includes(user.role);
 }
 
 async function mutateState(mutator) {
@@ -89,6 +128,11 @@ export async function bootstrapState(user) {
   if (!Array.isArray(state.transactions)) {
     state.transactions = [];
   }
+
+  if (!Array.isArray(state.notifications)) {
+    state.notifications = [];
+  }
+
   if (!state.financialSettings) {
     state.financialSettings = buildFinancialSettings(state);
   }
@@ -102,6 +146,7 @@ export async function bootstrapState(user) {
   const depositQueue = user && [ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.MONEY_ADMIN].includes(user.role) ? buildDepositQueue(state) : [];
   const pendingVerifications = user && [ROLES.ADMIN, ROLES.SUPER_ADMIN].includes(user.role) ? getPendingVerificationsInternal(state) : [];
   const financialSettings = user && [ROLES.SUPER_ADMIN].includes(user.role) ? buildFinancialSettings(state) : null;
+  const adminUsers = user && [ROLES.SUPER_ADMIN].includes(user.role) ? state.users.filter((u) => [ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.MONEY_ADMIN, ROLES.GAME_ADMIN].includes(u.role)).map(publicUser) : [];
   return {
     appName: state.meta.appName,
     complianceMode: state.meta.complianceMode,
@@ -128,6 +173,9 @@ export async function bootstrapState(user) {
     depositQueue,
     pendingVerifications,
     financialSettings,
+    adminUsers,
+    users: state.users.map(publicUser),
+    notifications: user ? (state.notifications || []).filter(n => !n.targetUserId || n.targetUserId === user.id).slice(0, 20) : [],
     winnerHistory: refreshedRounds
       .filter((round) => round.status === ROUND_STATUSES.COMPLETED || round.winners.length)
       .map((round) => ({
@@ -318,6 +366,29 @@ function buildWithdrawalQueue(state) {
   });
 }
 
+function createNotification(type, message, targetUserId = null, metadata = {}) {
+  return {
+    id: `notif_${crypto.randomUUID()}`,
+    type,
+    message,
+    targetUserId,
+    isRead: false,
+    metadata,
+    createdAt: now(),
+  };
+}
+
+function addNotification(state, notification) {
+  if (!Array.isArray(state.notifications)) {
+    state.notifications = [];
+  }
+  state.notifications.unshift(notification);
+  // Keep only last 100 notifications
+  if (state.notifications.length > 100) {
+    state.notifications = state.notifications.slice(0, 100);
+  }
+}
+
 function buildDepositQueue(state) {
   if (!Array.isArray(state.transactions)) {
     state.transactions = [];
@@ -372,13 +443,13 @@ function buildFinancialSettings(state) {
 }
 
 export async function getFinancialSettings(user) {
-  requireRole(user, [ROLES.ADMIN, ROLES.SUPER_ADMIN]);
+  requireSuperAdmin(user);
   const state = await readState();
   return buildFinancialSettings(state);
 }
 
 export async function updateFinancialSettings(input, actor) {
-  requireRole(actor, [ROLES.SUPER_ADMIN]);
+  requireSuperAdmin(actor);
   return mutateState((state) => {
     const settings = buildFinancialSettings(state);
 
@@ -397,7 +468,7 @@ export async function updateFinancialSettings(input, actor) {
       createAuditEntry({
         actorUserId: actor.id,
         actorRole: actor.role,
-        action: 'FINANCIAL_SETTINGS_UPDATED',
+        action: AUDIT_ACTIONS.FINANCIAL_SETTINGS_UPDATED,
         entityType: 'FINANCIAL_SETTINGS',
         entityId: 'global',
         before: previousSettings,
@@ -410,7 +481,7 @@ export async function updateFinancialSettings(input, actor) {
 }
 
 export async function createPromotionCampaign(input, actor) {
-  requireRole(actor, [ROLES.ADMIN, ROLES.SUPER_ADMIN]);
+  requireAdminOrSuperAdmin(actor);
   return mutateState((state) => {
     const gameType = state.gameTypes.find((item) => item.id === input.gameTypeId);
     if (!gameType) throw new Error('Game type not found');
@@ -465,19 +536,19 @@ export async function createPromotionCampaign(input, actor) {
 }
 
 export async function getPromotionDashboard(user) {
-  requireRole(user, [ROLES.ADMIN, ROLES.SUPER_ADMIN]);
+  requireAdminOrSuperAdmin(user);
   const state = await readState();
   return buildPromotionDashboard(state);
 }
 
 export async function getLiveBroadcastDashboard(user) {
-  requireRole(user, [ROLES.ADMIN, ROLES.SUPER_ADMIN]);
+  requireAdminOrSuperAdmin(user);
   const state = await readState();
   return buildLiveBroadcastDashboard(state);
 }
 
 export async function createLiveBroadcast(input, actor) {
-  requireRole(actor, [ROLES.ADMIN, ROLES.SUPER_ADMIN]);
+  requireAdminOrSuperAdmin(actor);
   return mutateState((state) => {
     validateBroadcastPlatforms(Array.isArray(input.platforms) ? input.platforms : input.platforms?.split(',').map(p => p.trim()));
     const broadcast = createBroadcast(input);
@@ -499,7 +570,7 @@ export async function createLiveBroadcast(input, actor) {
 }
 
 export async function toggleLiveBroadcast(broadcastId, action, actor) {
-  requireRole(actor, [ROLES.ADMIN, ROLES.SUPER_ADMIN]);
+  requireAdminOrSuperAdmin(actor);
   return mutateState((state) => {
     const broadcast = (state.liveBroadcasts || []).find((item) => item.id === broadcastId);
     if (!broadcast) throw new Error('Broadcast not found');
@@ -534,7 +605,7 @@ export async function toggleLiveBroadcast(broadcastId, action, actor) {
 }
 
 export async function trackPromotionEvent(campaignId, eventType, actor) {
-  requireRole(actor, [ROLES.ADMIN, ROLES.SUPER_ADMIN]);
+  requireAdminOrSuperAdmin(actor);
   return mutateState((state) => {
     const campaign = (state.promotionCampaigns || []).find((item) => item.id === campaignId);
     if (!campaign) throw new Error('Campaign not found');
@@ -645,9 +716,9 @@ export async function registerPlayer(input) {
     if (state.users.some((user) => user.phone === phone)) throw new Error('Phone already exists');
     if (email && state.users.some((user) => user.email === email)) throw new Error('Email already exists');
 
-    // If this is the first user, make them a SUPER_ADMIN for initial setup
-    const isFirstUser = state.users.length === 0;
-    const role = isFirstUser ? ROLES.SUPER_ADMIN : ROLES.PLAYER;
+    // First user should NOT automatically become Super Admin
+    // Super Admin must be created manually with specific email
+    const role = ROLES.PLAYER;
 
     const { hash, salt } = hashPassword(password);
     const user = {
@@ -659,7 +730,7 @@ export async function registerPlayer(input) {
       passwordHash: hash,
       salt,
       location: String(input.location || '').trim() || null,
-      verificationStatus: isFirstUser ? USER_VERIFICATION_STATUSES.VERIFIED : USER_VERIFICATION_STATUSES.PENDING_VERIFICATION,
+      verificationStatus: USER_VERIFICATION_STATUSES.PENDING_VERIFICATION,
       acceptedTermsVersion: state.meta.termsVersion || '1.0',
       acceptedGameRulesVersion: state.meta.gameRulesVersion || '1.0',
       acceptedTermsAt: now(),
@@ -681,7 +752,7 @@ export async function registerPlayer(input) {
         entityType: 'USER',
         entityId: user.id,
         after: publicUser(user),
-        metadata: { isFirstUser, initialSetup: isFirstUser, message: isFirstUser ? 'First user automatically became SUPER_ADMIN' : 'Standard player registration' },
+        metadata: { message: 'Standard player registration' },
       }),
     );
     return { user: publicUser(user), token: createSignedToken({ userId: user.id, role: user.role }) };
@@ -708,6 +779,7 @@ export async function login(input) {
         action: AUDIT_ACTIONS.USER_LOGGED_IN,
         entityType: 'USER',
         entityId: user.id,
+        metadata: { loginMethod: 'credentials' },
       }),
     );
   });
@@ -738,9 +810,8 @@ export async function completeSocialSignup(input) {
     // Check if phone already exists
     if (state.users.some((user) => user.phone === phone)) throw new Error('Phone already exists');
 
-    // If this is the first user, make them a SUPER_ADMIN for initial setup
-    const isFirstUser = state.users.length === 0;
-    const role = isFirstUser ? ROLES.SUPER_ADMIN : ROLES.PLAYER;
+    // First user should NOT automatically become Super Admin
+    const role = ROLES.PLAYER;
 
     // Generate a random password for social sign-up users
     const { hash, salt } = hashPassword(crypto.randomUUID());
@@ -754,7 +825,7 @@ export async function completeSocialSignup(input) {
       passwordHash: hash,
       salt,
       location,
-      verificationStatus: isFirstUser ? USER_VERIFICATION_STATUSES.VERIFIED : USER_VERIFICATION_STATUSES.PENDING_VERIFICATION,
+      verificationStatus: USER_VERIFICATION_STATUSES.PENDING_VERIFICATION,
       acceptedTermsVersion: state.meta.termsVersion || '1.0',
       acceptedGameRulesVersion: state.meta.gameRulesVersion || '1.0',
       acceptedTermsAt: now(),
@@ -776,17 +847,12 @@ export async function completeSocialSignup(input) {
         entityType: 'USER',
         entityId: user.id,
         after: publicUser(user),
-        metadata: { socialProvider: provider, socialSignup: true, isFirstUser, initialSetup: isFirstUser },
+        metadata: { socialProvider: provider, socialSignup: true },
       }),
     );
 
     return { user: publicUser(user), token: createSignedToken({ userId: user.id, role: user.role }) };
   });
-}
-
-export async function getUserCount() {
-  const state = await readState();
-  return state.users?.length || 0;
 }
 
 export async function resolveUserFromCookie(cookieValue) {
@@ -798,7 +864,7 @@ export async function resolveUserFromCookie(cookieValue) {
 }
 
 export async function approveUserVerification(userId, actor) {
-  requireRole(actor, [ROLES.ADMIN, ROLES.SUPER_ADMIN]);
+  requireAdminOrSuperAdmin(actor);
   return mutateState((state) => {
     const user = state.users.find((item) => item.id === userId);
     if (!user) throw new Error('User not found');
@@ -806,12 +872,20 @@ export async function approveUserVerification(userId, actor) {
     user.verificationStatus = USER_VERIFICATION_STATUSES.VERIFIED;
     user.updatedAt = now();
 
+    // Create notification for user
+    addNotification(state, createNotification(
+      NOTIFICATION_TYPES.NEW_USER_VERIFICATION,
+      'Your account has been verified',
+      user.id,
+      { userId: user.id }
+    ));
+
     appendAudit(
       state,
       createAuditEntry({
         actorUserId: actor.id,
         actorRole: actor.role,
-        action: 'USER_VERIFICATION_APPROVED',
+        action: AUDIT_ACTIONS.USER_VERIFICATION_APPROVED,
         entityType: 'USER',
         entityId: user.id,
         before: { verificationStatus: USER_VERIFICATION_STATUSES.PENDING_VERIFICATION },
@@ -824,7 +898,7 @@ export async function approveUserVerification(userId, actor) {
 }
 
 export async function rejectUserVerification(userId, reason, actor) {
-  requireRole(actor, [ROLES.ADMIN, ROLES.SUPER_ADMIN]);
+  requireAdminOrSuperAdmin(actor);
   return mutateState((state) => {
     const user = state.users.find((item) => item.id === userId);
     if (!user) throw new Error('User not found');
@@ -838,12 +912,234 @@ export async function rejectUserVerification(userId, reason, actor) {
       createAuditEntry({
         actorUserId: actor.id,
         actorRole: actor.role,
-        action: 'USER_VERIFICATION_REJECTED',
+        action: AUDIT_ACTIONS.USER_VERIFICATION_REJECTED,
         entityType: 'USER',
         entityId: user.id,
         before: { verificationStatus: USER_VERIFICATION_STATUSES.PENDING_VERIFICATION },
         after: { verificationStatus: USER_VERIFICATION_STATUSES.REJECTED },
         metadata: { reason },
+      }),
+    );
+
+    return publicUser(user);
+  });
+}
+
+export async function createAdmin(input, actor) {
+  requireSuperAdmin(actor);
+  return mutateState((state) => {
+    const fullName = String(input.fullName || '').trim();
+    const phone = String(input.phone || '').trim();
+    const email = String(input.email || '').trim().toLowerCase();
+    const password = String(input.password || '');
+    const role = String(input.role || '').toUpperCase();
+
+    if (!fullName || !phone || !email || !password) {
+      throw new Error('Name, phone, email, and password are required');
+    }
+
+    if (state.users.some((user) => user.phone === phone)) {
+      throw new Error('Phone already exists');
+    }
+
+    if (state.users.some((user) => user.email === email)) {
+      throw new Error('Email already exists');
+    }
+
+    if (!Object.values(ROLES).includes(role)) {
+      throw new Error('Invalid role');
+    }
+
+    if (role === ROLES.SUPER_ADMIN && !canAssignSuperAdminRole(email)) {
+      throw new Error('Super Admin role can only be assigned to konaneba8@gmail.com');
+    }
+
+    const { hash, salt } = hashPassword(password);
+    const user = {
+      id: `usr_${crypto.randomUUID()}`,
+      role,
+      fullName,
+      phone,
+      email,
+      passwordHash: hash,
+      salt,
+      location: String(input.location || '').trim() || null,
+      verificationStatus: USER_VERIFICATION_STATUSES.VERIFIED,
+      acceptedTermsVersion: state.meta.termsVersion || '1.0',
+      acceptedGameRulesVersion: state.meta.gameRulesVersion || '1.0',
+      acceptedTermsAt: now(),
+      acceptedGameRulesAt: now(),
+      createdAt: now(),
+      updatedAt: now(),
+    };
+
+    state.users.push(user);
+
+    appendAudit(
+      state,
+      createAuditEntry({
+        actorUserId: actor.id,
+        actorRole: actor.role,
+        action: AUDIT_ACTIONS.ADMIN_CREATED,
+        entityType: 'USER',
+        entityId: user.id,
+        after: publicUser(user),
+        metadata: { role },
+      }),
+    );
+
+    return publicUser(user);
+  });
+}
+
+export async function updateAdmin(userId, input, actor) {
+  requireSuperAdmin(actor);
+  return mutateState((state) => {
+    const user = state.users.find((item) => item.id === userId);
+    if (!user) throw new Error('User not found');
+
+    const previousRole = user.role;
+    const previousData = { ...publicUser(user) };
+
+    if (input.fullName) user.fullName = String(input.fullName).trim();
+    if (input.phone) {
+      const newPhone = String(input.phone).trim();
+      if (newPhone !== user.phone && state.users.some((u) => u.phone === newPhone && u.id !== userId)) {
+        throw new Error('Phone already exists');
+      }
+      user.phone = newPhone;
+    }
+    if (input.email) {
+      const newEmail = String(input.email).trim().toLowerCase();
+      if (newEmail !== user.email && state.users.some((u) => u.email === newEmail && u.id !== userId)) {
+        throw new Error('Email already exists');
+      }
+      user.email = newEmail;
+    }
+    if (input.location !== undefined) user.location = String(input.location).trim() || null;
+    if (input.role) {
+      const newRole = String(input.role).toUpperCase();
+      if (!Object.values(ROLES).includes(newRole)) {
+        throw new Error('Invalid role');
+      }
+      if (newRole === ROLES.SUPER_ADMIN && !canAssignSuperAdminRole(user.email)) {
+        throw new Error('Super Admin role can only be assigned to konaneba8@gmail.com');
+      }
+      user.role = newRole;
+    }
+    if (input.password) {
+      const { hash, salt } = hashPassword(input.password);
+      user.passwordHash = hash;
+      user.salt = salt;
+    }
+
+    user.updatedAt = now();
+
+    const actionType = previousRole !== user.role ? AUDIT_ACTIONS.ADMIN_ROLE_CHANGED : AUDIT_ACTIONS.ADMIN_UPDATED;
+    appendAudit(
+      state,
+      createAuditEntry({
+        actorUserId: actor.id,
+        actorRole: actor.role,
+        action: actionType,
+        entityType: 'USER',
+        entityId: user.id,
+        before: previousData,
+        after: publicUser(user),
+        metadata: { roleChanged: previousRole !== user.role, previousRole, newRole: user.role },
+      }),
+    );
+
+    return publicUser(user);
+  });
+}
+
+export async function deleteAdmin(userId, actor) {
+  requireSuperAdmin(actor);
+  return mutateState((state) => {
+    const userIndex = state.users.findIndex((item) => item.id === userId);
+    if (userIndex === -1) throw new Error('User not found');
+
+    const user = state.users[userIndex];
+    if (user.id === actor.id) throw new Error('Cannot delete yourself');
+
+    const previousData = publicUser(user);
+    state.users.splice(userIndex, 1);
+
+    appendAudit(
+      state,
+      createAuditEntry({
+        actorUserId: actor.id,
+        actorRole: actor.role,
+        action: AUDIT_ACTIONS.ADMIN_DELETED,
+        entityType: 'USER',
+        entityId: user.id,
+        before: previousData,
+      }),
+    );
+
+    return { success: true };
+  });
+}
+
+export async function listAdmins(actor) {
+  requireSuperAdmin(actor);
+  const state = await readState();
+  return state.users
+    .filter((user) => [ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.MONEY_ADMIN, ROLES.GAME_ADMIN].includes(user.role))
+    .map(publicUser)
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+}
+
+export async function suspendUser(userId, input, actor) {
+  requireSuperAdmin(actor);
+  return mutateState((state) => {
+    const user = state.users.find((item) => item.id === userId);
+    if (!user) throw new Error('User not found');
+    if (user.id === actor.id) throw new Error('Cannot suspend yourself');
+
+    const previousStatus = user.isActive;
+    user.isActive = false;
+    user.updatedAt = now();
+
+    appendAudit(
+      state,
+      createAuditEntry({
+        actorUserId: actor.id,
+        actorRole: actor.role,
+        action: AUDIT_ACTIONS.USER_SUSPENDED,
+        entityType: 'USER',
+        entityId: user.id,
+        before: { isActive: previousStatus },
+        after: { isActive: false },
+        metadata: { suspendedBy: actor.fullName, reason: input?.reason || 'Administrative action' },
+      }),
+    );
+
+    return publicUser(user);
+  });
+}
+
+export async function activateUser(userId, actor) {
+  requireSuperAdmin(actor);
+  return mutateState((state) => {
+    const user = state.users.find((item) => item.id === userId);
+    if (!user) throw new Error('User not found');
+
+    const previousStatus = user.isActive;
+    user.isActive = true;
+    user.updatedAt = now();
+
+    appendAudit(
+      state,
+      createAuditEntry({
+        actorUserId: actor.id,
+        actorRole: actor.role,
+        action: AUDIT_ACTIONS.USER_ACTIVATED,
+        entityType: 'USER',
+        entityId: user.id,
+        before: { isActive: previousStatus },
+        after: { isActive: true },
       }),
     );
 
@@ -872,7 +1168,7 @@ export async function getPlayerDashboard(user) {
 }
 
 export async function getAdminPaymentQueue(user) {
-  requireRole(user, [ROLES.ADMIN, ROLES.SUPER_ADMIN]);
+  requireAdminOrSuperAdmin(user);
   const state = await readState();
   const refreshedRounds = state.rounds.map((round) => summarizeRound(state, expireStaleEntries(refreshRoundStatus(round))));
   return buildAdminPaymentQueue(state, refreshedRounds);
@@ -880,7 +1176,17 @@ export async function getAdminPaymentQueue(user) {
 
 export async function getPaymentMethods() {
   const state = await readState();
-  return buildPaymentMethods(state);
+  const methods = buildPaymentMethods(state);
+  // Only return active payment methods for users
+  return methods.filter(method => method.isActive).sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
+}
+
+export async function getAdminPaymentMethods(user) {
+  requireAdminOrSuperAdmin(user);
+  const state = await readState();
+  const methods = buildPaymentMethods(state);
+  // Return all payment methods for admin (including inactive)
+  return methods.sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
 }
 
 export async function getRoundAuditTrail(roundId, user = null) {
@@ -917,7 +1223,7 @@ export async function getAuditLog() {
 }
 
 export async function changeRoundStatus(roundId, nextStatus, actor) {
-  requireRole(actor, [ROLES.ADMIN, ROLES.SUPER_ADMIN]);
+  requireGameAdminOrSuperAdmin(actor);
   return mutateState((state) => {
     const round = state.rounds.find((item) => item.id === roundId || item.number === roundId);
     if (!round) throw new Error('Round not found');
@@ -945,7 +1251,7 @@ export async function changeRoundStatus(roundId, nextStatus, actor) {
 }
 
 export async function createRound(input, actor) {
-  requireRole(actor, [ROLES.ADMIN, ROLES.SUPER_ADMIN]);
+  requireGameAdminOrSuperAdmin(actor);
   return mutateState((state) => {
     const gameType = getGameType(state.gameTypes, input.gameTypeId);
     if (!gameType) throw new Error('Game type not found');
@@ -968,7 +1274,7 @@ export async function createRound(input, actor) {
 }
 
 export async function createGameTypeAction(input, actor) {
-  requireRole(actor, [ROLES.ADMIN, ROLES.SUPER_ADMIN]);
+  requireGameAdminOrSuperAdmin(actor);
   return mutateState((state) => {
     const gameType = createGameType(input);
     state.gameTypes.unshift(gameType);
@@ -977,7 +1283,7 @@ export async function createGameTypeAction(input, actor) {
       createAuditEntry({
         actorUserId: actor.id,
         actorRole: actor.role,
-        action: 'GAME_TYPE_CREATED',
+        action: AUDIT_ACTIONS.ROUND_CREATED,
         entityType: 'GAME_TYPE',
         entityId: gameType.id,
         after: gameType,
@@ -988,30 +1294,43 @@ export async function createGameTypeAction(input, actor) {
 }
 
 export async function createPaymentMethodAction(input, actor) {
-  requireRole(actor, [ROLES.ADMIN, ROLES.SUPER_ADMIN]);
+  if (!canManagePaymentMethods(actor)) throw new Error('Forbidden');
   return mutateState((state) => {
     const paymentMethods = buildPaymentMethods(state);
     const paymentMethod = {
       id: `pay_${crypto.randomUUID()}`,
       name: String(input.name || '').trim(),
-      instructions: String(input.instructions || '').trim(),
+      bankName: String(input.bankName || '').trim(),
       accountName: String(input.accountName || '').trim(),
       accountNumber: String(input.accountNumber || '').trim(),
-      referenceHint: String(input.referenceHint || '').trim(),
-      paymentType: String(input.paymentType || 'bank').trim(),
+      walletName: String(input.walletName || '').trim(),
+      walletNumber: String(input.walletNumber || '').trim(),
+      paymentType: String(input.paymentType || 'bank').trim().toLowerCase(),
       displayOrder: Number(input.displayOrder || 0),
       isActive: input.isActive !== false,
+      createdBy: actor.id,
       createdAt: now(),
       updatedAt: now(),
     };
+    
     if (!paymentMethod.name) throw new Error('Payment method name is required');
+    if (!paymentMethod.paymentType || !['bank', 'wallet'].includes(paymentMethod.paymentType)) {
+      throw new Error('Payment type must be either "bank" or "wallet"');
+    }
+    if (paymentMethod.paymentType === 'bank' && (!paymentMethod.bankName || !paymentMethod.accountNumber)) {
+      throw new Error('Bank name and account number are required for bank payment type');
+    }
+    if (paymentMethod.paymentType === 'wallet' && (!paymentMethod.walletName || !paymentMethod.walletNumber)) {
+      throw new Error('Wallet name and wallet number are required for wallet payment type');
+    }
+    
     paymentMethods.unshift(paymentMethod);
     appendAudit(
       state,
       createAuditEntry({
         actorUserId: actor.id,
         actorRole: actor.role,
-        action: 'PAYMENT_METHOD_CREATED',
+        action: AUDIT_ACTIONS.PAYMENT_METHOD_CREATED,
         entityType: 'PAYMENT_METHOD',
         entityId: paymentMethod.id,
         after: paymentMethod,
@@ -1022,7 +1341,7 @@ export async function createPaymentMethodAction(input, actor) {
 }
 
 export async function togglePaymentMethodAction(paymentMethodId, actor) {
-  requireRole(actor, [ROLES.ADMIN, ROLES.SUPER_ADMIN]);
+  if (!canManagePaymentMethods(actor)) throw new Error('Forbidden');
   return mutateState((state) => {
     const paymentMethods = buildPaymentMethods(state);
     const paymentMethod = paymentMethods.find((item) => item.id === paymentMethodId);
@@ -1034,7 +1353,7 @@ export async function togglePaymentMethodAction(paymentMethodId, actor) {
       createAuditEntry({
         actorUserId: actor.id,
         actorRole: actor.role,
-        action: 'PAYMENT_METHOD_TOGGLED',
+        action: AUDIT_ACTIONS.PAYMENT_METHOD_TOGGLED,
         entityType: 'PAYMENT_METHOD',
         entityId: paymentMethod.id,
         after: paymentMethod,
@@ -1045,18 +1364,21 @@ export async function togglePaymentMethodAction(paymentMethodId, actor) {
 }
 
 export async function editPaymentMethodAction(paymentMethodId, input, actor) {
-  requireRole(actor, [ROLES.ADMIN, ROLES.SUPER_ADMIN]);
+  if (!canManagePaymentMethods(actor)) throw new Error('Forbidden');
   return mutateState((state) => {
     const paymentMethods = buildPaymentMethods(state);
     const paymentMethod = paymentMethods.find((item) => item.id === paymentMethodId);
     if (!paymentMethod) throw new Error('Payment method not found');
 
+    const previousData = { ...paymentMethod };
+
     paymentMethod.name = String(input.name || paymentMethod.name).trim();
-    paymentMethod.instructions = String(input.instructions || paymentMethod.instructions).trim();
+    paymentMethod.bankName = String(input.bankName || paymentMethod.bankName).trim();
     paymentMethod.accountName = String(input.accountName || paymentMethod.accountName).trim();
     paymentMethod.accountNumber = String(input.accountNumber || paymentMethod.accountNumber).trim();
-    paymentMethod.referenceHint = String(input.referenceHint || paymentMethod.referenceHint).trim();
-    paymentMethod.paymentType = String(input.paymentType || paymentMethod.paymentType).trim();
+    paymentMethod.walletName = String(input.walletName || paymentMethod.walletName).trim();
+    paymentMethod.walletNumber = String(input.walletNumber || paymentMethod.walletNumber).trim();
+    paymentMethod.paymentType = String(input.paymentType || paymentMethod.paymentType).trim().toLowerCase();
     paymentMethod.displayOrder = Number(input.displayOrder !== undefined ? input.displayOrder : paymentMethod.displayOrder);
     paymentMethod.isActive = input.isActive !== undefined ? input.isActive : paymentMethod.isActive;
     paymentMethod.updatedAt = now();
@@ -1066,19 +1388,19 @@ export async function editPaymentMethodAction(paymentMethodId, input, actor) {
       createAuditEntry({
         actorUserId: actor.id,
         actorRole: actor.role,
-        action: 'PAYMENT_METHOD_UPDATED',
+        action: AUDIT_ACTIONS.PAYMENT_METHOD_UPDATED,
         entityType: 'PAYMENT_METHOD',
         entityId: paymentMethod.id,
+        before: previousData,
         after: paymentMethod,
       }),
     );
-
     return paymentMethod;
   });
 }
 
 export async function deletePaymentMethodAction(paymentMethodId, actor) {
-  requireRole(actor, [ROLES.ADMIN, ROLES.SUPER_ADMIN]);
+  if (!canManagePaymentMethods(actor)) throw new Error('Forbidden');
   return mutateState((state) => {
     const paymentMethods = buildPaymentMethods(state);
     const index = paymentMethods.findIndex((item) => item.id === paymentMethodId);
@@ -1091,7 +1413,7 @@ export async function deletePaymentMethodAction(paymentMethodId, actor) {
       createAuditEntry({
         actorUserId: actor.id,
         actorRole: actor.role,
-        action: 'PAYMENT_METHOD_DELETED',
+        action: AUDIT_ACTIONS.PAYMENT_METHOD_DELETED,
         entityType: 'PAYMENT_METHOD',
         entityId: deleted.id,
         before: deleted,
@@ -1157,7 +1479,7 @@ export async function attachPaymentReceipt(entryId, input, actor) {
 }
 
 export async function verifyPayment(entryId, actor) {
-  requireRole(actor, [ROLES.ADMIN, ROLES.SUPER_ADMIN]);
+  requireAdminOrSuperAdmin(actor);
   return mutateState((state) => {
     for (const round of state.rounds) {
       const entry = getRoundEntries(round).find((item) => item.id === entryId);
@@ -1182,7 +1504,7 @@ export async function verifyPayment(entryId, actor) {
 }
 
 export async function rejectPayment(entryId, reason, actor) {
-  requireRole(actor, [ROLES.ADMIN, ROLES.SUPER_ADMIN]);
+  requireAdminOrSuperAdmin(actor);
   return mutateState((state) => {
     for (const round of state.rounds) {
       const entry = getRoundEntries(round).find((item) => item.id === entryId);
@@ -1216,7 +1538,7 @@ export async function getBroadcastStreamConfig(broadcastId) {
   return getBroadcastStreamConfigInternal(broadcast);
 }
 export async function drawRound(roundId, actor) {
-  requireRole(actor, [ROLES.ADMIN, ROLES.SUPER_ADMIN]);
+  requireGameAdminOrSuperAdmin(actor);
   return mutateState((state) => {
     const round = state.rounds.find((item) => item.id === roundId || item.number === roundId);
     if (!round) throw new Error('Round not found');
@@ -1274,7 +1596,7 @@ export async function drawRound(roundId, actor) {
 }
 
 export async function completeDraw(roundId, actor) {
-  requireRole(actor, [ROLES.ADMIN, ROLES.SUPER_ADMIN]);
+  requireGameAdminOrSuperAdmin(actor);
   return mutateState((state) => {
     const round = state.rounds.find((item) => item.id === roundId || item.number === roundId);
     if (!round) throw new Error('Round not found');
@@ -1359,6 +1681,15 @@ export async function createDeposit(input, actor) {
     const transaction = createDepositTransaction(actor.id, input.amount, input.paymentMethod, paymentDetails);
     state.transactions = state.transactions || [];
     state.transactions.unshift(transaction);
+    
+    // Create notification for admins
+    addNotification(state, createNotification(
+      NOTIFICATION_TYPES.NEW_DEPOSIT,
+      `New deposit request: ${input.amount} ETB from ${actor.fullName}`,
+      null,
+      { userId: actor.id, amount: input.amount, transactionId: transaction.id }
+    ));
+    
     appendAudit(
       state,
       createAuditEntry({
@@ -1375,7 +1706,7 @@ export async function createDeposit(input, actor) {
 }
 
 export async function completeDeposit(transactionId, actor) {
-  requireRole(actor, [ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.MONEY_ADMIN]);
+  requireMoneyAdminOrSuperAdmin(actor);
   return mutateState((state) => {
     const transaction = (state.transactions || []).find((txn) => txn.id === transactionId);
     if (!transaction) throw new Error('Transaction not found');
@@ -1397,7 +1728,7 @@ export async function completeDeposit(transactionId, actor) {
 }
 
 export async function rejectDeposit(transactionId, reason, actor) {
-  requireRole(actor, [ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.MONEY_ADMIN]);
+  requireMoneyAdminOrSuperAdmin(actor);
   return mutateState((state) => {
     const transaction = (state.transactions || []).find((txn) => txn.id === transactionId);
     if (!transaction) throw new Error('Transaction not found');
@@ -1434,6 +1765,15 @@ export async function createWithdrawal(input, actor) {
     const transaction = createWithdrawalTransaction(actor.id, input.amount, input.paymentDetails);
     state.transactions = state.transactions || [];
     state.transactions.unshift(transaction);
+    
+    // Create notification for admins
+    addNotification(state, createNotification(
+      NOTIFICATION_TYPES.NEW_WITHDRAWAL,
+      `New withdrawal request: ${input.amount} ETB from ${actor.fullName}`,
+      null,
+      { userId: actor.id, amount: input.amount, transactionId: transaction.id }
+    ));
+    
     appendAudit(
       state,
       createAuditEntry({
@@ -1450,7 +1790,7 @@ export async function createWithdrawal(input, actor) {
 }
 
 export async function approveWithdrawal(transactionId, actor) {
-  requireRole(actor, [ROLES.ADMIN, ROLES.SUPER_ADMIN]);
+  requireMoneyAdminOrSuperAdmin(actor);
   return mutateState((state) => {
     const transaction = (state.transactions || []).find((txn) => txn.id === transactionId);
     if (!transaction) throw new Error('Transaction not found');
@@ -1471,8 +1811,31 @@ export async function approveWithdrawal(transactionId, actor) {
   });
 }
 
+export async function getNotifications(user) {
+  if (!user) return [];
+  const state = await readState();
+  return (state.notifications || [])
+    .filter(n => !n.targetUserId || n.targetUserId === user.id)
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+    .slice(0, 50);
+}
+
+export async function markNotificationRead(notificationId, actor) {
+  if (!actor) throw new Error('Authentication required');
+  return mutateState((state) => {
+    const notification = (state.notifications || []).find(n => n.id === notificationId);
+    if (!notification) throw new Error('Notification not found');
+    if (notification.targetUserId && notification.targetUserId !== actor.id) {
+      throw new Error('Forbidden');
+    }
+    notification.isRead = true;
+    notification.updatedAt = now();
+    return notification;
+  });
+}
+
 export async function rejectWithdrawal(transactionId, reason, actor) {
-  requireRole(actor, [ROLES.ADMIN, ROLES.SUPER_ADMIN]);
+  requireMoneyAdminOrSuperAdmin(actor);
   return mutateState((state) => {
     const transaction = (state.transactions || []).find((txn) => txn.id === transactionId);
     if (!transaction) throw new Error('Transaction not found');

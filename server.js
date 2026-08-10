@@ -7,6 +7,7 @@ import { PORT, SESSION_COOKIE, OAUTH_CONFIG } from './src/config.js';
 import { parseCookies, serializeCookie, verifySignedToken } from './src/lib/security.js';
 import formidable from 'formidable';
 import {
+  activateUser,
   approveUserVerification,
   approveWithdrawal,
   bootstrapState,
@@ -14,6 +15,7 @@ import {
   completeDraw,
   completeDeposit,
   completeSocialSignup,
+  createAdmin,
   createDeposit,
   createGameTypeAction,
   createLiveBroadcast,
@@ -21,15 +23,18 @@ import {
   createPromotionCampaign,
   createRound,
   createWithdrawal,
+  deleteAdmin,
   deletePaymentMethodAction,
   drawRound,
   editPaymentMethodAction,
+  getAdminPaymentMethods,
   getAuditLog,
   getBroadcastStreamConfig,
   getDepositQueue,
   getFinancialSettings,
   getHistory,
   getLiveBroadcastDashboard,
+  getNotifications,
   getPaymentMethods,
   getPendingVerifications,
   getPromotionDashboard,
@@ -40,19 +45,22 @@ import {
   getWalletDashboard,
   getWithdrawalQueue,
   joinRound,
+  listAdmins,
   login,
+  markNotificationRead,
   rejectDeposit,
   rejectPayment,
   rejectUserVerification,
   rejectWithdrawal,
   registerPlayer,
   resolveUserFromCookie,
+  suspendUser,
   toggleLiveBroadcast,
   togglePaymentMethodAction,
   trackPromotionEvent,
+  updateAdmin,
   updateFinancialSettings,
   verifyPayment,
-  getUserCount,
 } from './src/services/app-service.js';
 import { renderAdminPage, renderAuditPage, renderDashboardPage, renderGameRulesPage, renderHistoryDetailPage, renderHistoryPage, renderHomePage, renderLivePage, renderLivestreamPage, renderLoginPage, renderRoundPage, renderTermsPage, renderWalletPage } from './src/views/pages.js';
 
@@ -126,11 +134,9 @@ async function handlePage(req, res, url) {
   const user = await currentUser(req);
   let html;
   if (url.pathname === '/login') {
-    const userCount = await getUserCount();
-    const isAdminSetup = userCount > 0;
     html = renderLoginPage({
       user,
-      content: `<section class="hero"><div class="eyebrow">Login</div><h1>Access your TikWheel account.</h1><p class="muted">${isAdminSetup ? 'Login with your existing account.' : 'Register a new account to get started. The first registered user will become the system administrator.'}</p></section>`,
+      content: `<section class="hero"><div class="eyebrow">Login</div><h1>Access your TikWheel account.</h1><p class="muted">Login with your existing account or register a new account to get started.</p></section>`,
     });
   } else if (url.pathname === '/terms') {
     html = renderTermsPage({
@@ -278,6 +284,11 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, await getPaymentMethods());
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/admin/payment-methods') {
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    return sendJson(res, 200, await getAdminPaymentMethods(user));
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/admin/promotions') {
     if (!user) return sendJson(res, 401, { error: 'Authentication required' });
     return sendJson(res, 200, await getPromotionDashboard(user));
@@ -370,6 +381,18 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, await createPaymentMethodAction(body || {}, user));
   }
 
+  const paymentMethodEditMatch = url.pathname.match(/^\/api\/admin\/payment-methods\/([^/]+)$/);
+  if (req.method === 'PUT' && paymentMethodEditMatch) {
+    const paymentMethodId = decodeURIComponent(paymentMethodEditMatch[1]);
+    return sendJson(res, 200, await editPaymentMethodAction(paymentMethodId, body || {}, user));
+  }
+
+  const paymentMethodDeleteMatch = url.pathname.match(/^\/api\/admin\/payment-methods\/([^/]+)$/);
+  if (req.method === 'DELETE' && paymentMethodDeleteMatch) {
+    const paymentMethodId = decodeURIComponent(paymentMethodDeleteMatch[1]);
+    return sendJson(res, 200, await deletePaymentMethodAction(paymentMethodId, user));
+  }
+
   if (req.method === 'POST' && url.pathname === '/api/admin/rounds') {
     return sendJson(res, 200, await createRound(body || {}, user));
   }
@@ -436,23 +459,7 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, await trackPromotionEvent(campaignId, body?.eventType || 'click', user));
   }
 
-  const paymentMethodToggleMatch = url.pathname.match(/^\/api\/admin\/payment-methods\/([^/]+)\/toggle$/);
-  if (req.method === 'POST' && paymentMethodToggleMatch) {
-    const paymentMethodId = decodeURIComponent(paymentMethodToggleMatch[1]);
-    return sendJson(res, 200, await togglePaymentMethodAction(paymentMethodId, user));
-  }
 
-  const paymentMethodEditMatch = url.pathname.match(/^\/api\/admin\/payment-methods\/([^/]+)$/);
-  if (req.method === 'PUT' && paymentMethodEditMatch) {
-    const paymentMethodId = decodeURIComponent(paymentMethodEditMatch[1]);
-    return sendJson(res, 200, await editPaymentMethodAction(paymentMethodId, body || {}, user));
-  }
-
-  const paymentMethodDeleteMatch = url.pathname.match(/^\/api\/admin\/payment-methods\/([^/]+)$/);
-  if (req.method === 'DELETE' && paymentMethodDeleteMatch) {
-    const paymentMethodId = decodeURIComponent(paymentMethodDeleteMatch[1]);
-    return sendJson(res, 200, await deletePaymentMethodAction(paymentMethodId, user));
-  }
 
   const userVerificationApproveMatch = url.pathname.match(/^\/api\/admin\/verifications\/([^/]+)\/approve$/);
   if (req.method === 'POST' && userVerificationApproveMatch) {
@@ -464,6 +471,50 @@ async function handleApi(req, res, url) {
   if (req.method === 'POST' && userVerificationRejectMatch) {
     const userId = decodeURIComponent(userVerificationRejectMatch[1]);
     return sendJson(res, 200, await rejectUserVerification(userId, body?.reason || 'Verification rejected', user));
+  }
+
+  // Admin management endpoints
+  if (req.method === 'GET' && url.pathname === '/api/admin/admins') {
+    return sendJson(res, 200, await listAdmins(user));
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/admin/admins') {
+    return sendJson(res, 200, await createAdmin(body || {}, user));
+  }
+
+  const adminUpdateMatch = url.pathname.match(/^\/api\/admin\/admins\/([^/]+)$/);
+  if (req.method === 'PUT' && adminUpdateMatch) {
+    const adminId = decodeURIComponent(adminUpdateMatch[1]);
+    return sendJson(res, 200, await updateAdmin(adminId, body || {}, user));
+  }
+
+  const adminDeleteMatch = url.pathname.match(/^\/api\/admin\/admins\/([^/]+)$/);
+  if (req.method === 'DELETE' && adminDeleteMatch) {
+    const adminId = decodeURIComponent(adminDeleteMatch[1]);
+    return sendJson(res, 200, await deleteAdmin(adminId, user));
+  }
+
+  const userSuspendMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)\/suspend$/);
+  if (req.method === 'POST' && userSuspendMatch) {
+    const userId = decodeURIComponent(userSuspendMatch[1]);
+    return sendJson(res, 200, await suspendUser(userId, user));
+  }
+
+  const userActivateMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)\/activate$/);
+  if (req.method === 'POST' && userActivateMatch) {
+    const userId = decodeURIComponent(userActivateMatch[1]);
+    return sendJson(res, 200, await activateUser(userId, user));
+  }
+
+  // Notification endpoints
+  if (req.method === 'GET' && url.pathname === '/api/notifications') {
+    return sendJson(res, 200, await getNotifications(user));
+  }
+
+  const notificationReadMatch = url.pathname.match(/^\/api\/notifications\/([^/]+)\/read$/);
+  if (req.method === 'POST' && notificationReadMatch) {
+    const notificationId = decodeURIComponent(notificationReadMatch[1]);
+    return sendJson(res, 200, await markNotificationRead(notificationId, user));
   }
 
   // OAuth callback handlers

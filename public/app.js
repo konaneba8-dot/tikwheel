@@ -1074,11 +1074,19 @@ function renderWallet() {
         <div class="stack">
           <p class="muted">Step 2 of 6: Select Bank/Wallet</p>
           <div class="field">
-            <label>Payment Method</label>
-            <select id="deposit-payment-method" required>
-              <option value="">Select method</option>
-              ${bootstrap.paymentMethods.filter(pm => pm.isActive).map(pm => `<option value="${pm.id}">${escapeHtml(pm.name)}</option>`).join('')}
+            <label>Payment Type</label>
+            <select id="deposit-payment-type" required>
+              <option value="">Select type</option>
+              <option value="bank">Bank Transfer</option>
+              <option value="wallet">Mobile Wallet</option>
             </select>
+          </div>
+          <div class="field">
+            <label>Payment Account</label>
+            <select id="deposit-payment-method" required>
+              <option value="">Select payment account</option>
+            </select>
+            <div class="small muted" id="payment-method-hint">Select a payment type first</div>
           </div>
           <button class="ghost-btn" id="deposit-step-1-back">Back</button>
           <button class="primary-btn" id="deposit-step-1-next">Next</button>
@@ -1087,12 +1095,10 @@ function renderWallet() {
       <div id="deposit-step-2" style="display: none;">
         <div class="stack">
           <p class="muted">Step 3 of 6: Payment Account Details</p>
-          <div class="notice">
+          <div class="notice" id="payment-account-details">
             <strong>Payment Account Information</strong>
             <div class="small muted">Please transfer funds to the following account:</div>
-            <div class="small">Bank: Commercial Bank of Ethiopia</div>
-            <div class="small">Account Number: 1000123456789</div>
-            <div class="small">Account Name: TikWheel PLC</div>
+            <div class="small">Loading account details...</div>
           </div>
           <button class="ghost-btn" id="deposit-step-2-back">Back</button>
           <button class="primary-btn" id="deposit-step-2-next">Next</button>
@@ -1284,19 +1290,101 @@ function renderWallet() {
     showDepositStep(1);
   });
 
-  // Deposit Step 1: Select Payment Method
+  // Deposit Step 1: Select Payment Type and Account
   document.getElementById('deposit-step-1-back')?.addEventListener('click', () => {
     state.depositStep = 0;
     showDepositStep(0);
   });
 
+  // Handle payment type selection
+  document.getElementById('deposit-payment-type')?.addEventListener('change', (e) => {
+    const paymentType = e.target.value;
+    const paymentMethodSelect = document.getElementById('deposit-payment-method');
+    const hintDiv = document.getElementById('payment-method-hint');
+    
+    // Clear existing options
+    paymentMethodSelect.innerHTML = '<option value="">Select payment account</option>';
+    
+    if (paymentType) {
+      const filteredMethods = bootstrap.paymentMethods.filter(pm => 
+        pm.isActive && pm.paymentType === paymentType
+      );
+      
+      if (filteredMethods.length > 0) {
+        filteredMethods.forEach(pm => {
+          const option = document.createElement('option');
+          option.value = pm.id;
+          option.textContent = pm.name;
+          paymentMethodSelect.appendChild(option);
+        });
+        hintDiv.textContent = `Found ${filteredMethods.length} ${paymentType} account(s)`;
+      } else {
+        hintDiv.textContent = `No active ${paymentType} accounts available`;
+      }
+    } else {
+      hintDiv.textContent = 'Select a payment type first';
+    }
+  });
+
   document.getElementById('deposit-step-1-next')?.addEventListener('click', () => {
+    const paymentType = document.getElementById('deposit-payment-type').value;
     const paymentMethod = document.getElementById('deposit-payment-method').value;
-    if (!paymentMethod) {
-      alert('Please select a payment method');
+    
+    if (!paymentType) {
+      alert('Please select a payment type');
       return;
     }
+    if (!paymentMethod) {
+      alert('Please select a payment account');
+      return;
+    }
+    
+    state.depositData.paymentType = paymentType;
     state.depositData.paymentMethod = paymentMethod;
+    
+    // Load payment method details
+    const selectedMethod = bootstrap.paymentMethods.find(pm => pm.id === paymentMethod);
+    if (selectedMethod) {
+      const accountDetailsDiv = document.getElementById('payment-account-details');
+      const isBank = selectedMethod.paymentType === 'bank';
+      
+      let accountDetails = '';
+      if (isBank) {
+        accountDetails = `
+          <div class="small"><strong>${escapeHtml(selectedMethod.bankName || selectedMethod.name)}</strong></div>
+          <div class="small">Account Name: ${escapeHtml(selectedMethod.accountName)}</div>
+          <div class="small">Account Number: <span id="account-number-display">${escapeHtml(selectedMethod.accountNumber)}</span> <button class="ghost-btn" id="copy-account-number" style="font-size: 0.8em; padding: 2px 8px;">Copy</button></div>
+        `;
+      } else {
+        accountDetails = `
+          <div class="small"><strong>${escapeHtml(selectedMethod.walletName || selectedMethod.name)}</strong></div>
+          <div class="small">Wallet Name: ${escapeHtml(selectedMethod.walletName)}</div>
+          <div class="small">Wallet Number: <span id="account-number-display">${escapeHtml(selectedMethod.walletNumber)}</span> <button class="ghost-btn" id="copy-account-number" style="font-size: 0.8em; padding: 2px 8px;">Copy</button></div>
+        `;
+      }
+      
+      accountDetailsDiv.innerHTML = `
+        <strong>Payment Account Information</strong>
+        <div class="small muted">Please transfer funds to the following account:</div>
+        ${accountDetails}
+      `;
+      
+      // Add copy functionality
+      document.getElementById('copy-account-number')?.addEventListener('click', () => {
+        const accountNumber = isBank ? selectedMethod.accountNumber : selectedMethod.walletNumber;
+        navigator.clipboard.writeText(accountNumber).then(() => {
+          alert('Account number copied to clipboard!');
+        }).catch(() => {
+          alert('Failed to copy account number');
+        });
+      });
+    } else {
+      document.getElementById('payment-account-details').innerHTML = `
+        <strong>Payment Account Information</strong>
+        <div class="small muted">No payment account details available.</div>
+      `;
+    }
+    
     state.depositStep = 2;
     showDepositStep(2);
   });
@@ -1770,7 +1858,7 @@ function renderAdmin() {
   const pendingVerifications = bootstrap.pendingVerifications || [];
   const financialSettings = bootstrap.financialSettings || null;
 
-  if (!user || !['ADMIN', 'SUPER_ADMIN', 'MONEY_ADMIN'].includes(user.role)) {
+  if (!user || !['ADMIN', 'SUPER_ADMIN', 'MONEY_ADMIN', 'GAME_ADMIN'].includes(user.role)) {
     app.innerHTML = `
       <section class="hero">
         <div class="eyebrow">Admin access required</div>
@@ -1781,17 +1869,89 @@ function renderAdmin() {
     return;
   }
 
+  const adminUsers = bootstrap.adminUsers || [];
+  const allUsers = bootstrap.users || [];
+  const notifications = bootstrap.notifications || [];
+
   app.innerHTML = `
     <section class="hero">
       <div class="eyebrow">Admin dashboard</div>
       <h1>Manage game types, rounds, payments, draws, and promotional campaigns.</h1>
       <p class="muted">Every important action writes to the audit log.</p>
     </section>
-    <section class="grid cols-3">
+    
+    ${notifications.length ? `
+    <section class="card">
+      <strong>Notifications (${notifications.filter(n => !n.isRead).length} unread)</strong>
+      <div class="stack">
+        ${notifications.slice(0, 5).map((notif) => `
+          <div class="notice ${notif.isRead ? 'muted' : ''}">
+            <strong>${escapeHtml(notif.message)}</strong>
+            <div class="small muted">${new Date(notif.createdAt).toLocaleString()}</div>
+            ${!notif.isRead ? `<button class="ghost-btn" data-notification-read="${notif.id}" style="font-size: 0.8em;">Mark as read</button>` : ''}
+          </div>
+        `).join('')}
+      </div>
+    </section>
+    ` : ''}
+    
+    <section class="grid cols-4">
       <div class="card"><strong>Total rounds</strong><div class="metric-value">${bootstrap.adminSummary?.totalRounds ?? bootstrap.rounds.length}</div><div class="metric-label">Tracked rounds</div></div>
       <div class="card"><strong>Ready to draw</strong><div class="metric-value">${bootstrap.adminSummary?.readyRounds ?? 0}</div><div class="metric-label">Rounds ready</div></div>
+      <div class="card"><strong>Total users</strong><div class="metric-value">${allUsers.length}</div><div class="metric-label">Registered users</div></div>
       <div class="card"><strong>Pending payments</strong><div class="metric-value">${bootstrap.adminSummary?.pendingPayments ?? 0}</div><div class="metric-label">Waiting review</div></div>
     </section>
+    
+    ${user.role === 'SUPER_ADMIN' ? `
+    <section class="card">
+      <strong>Admin Management (${adminUsers.length})</strong>
+      <div class="stack">
+        <div class="section-actions">
+          <button class="primary-btn" id="create-admin-btn">Create New Admin</button>
+        </div>
+        ${adminUsers.length ? adminUsers.map((admin) => `
+          <div class="notice">
+            <strong>${escapeHtml(admin.fullName)} (${escapeHtml(admin.role)})</strong>
+            <div class="small">Email: ${escapeHtml(admin.email || 'N/A')}</div>
+            <div class="small muted">Phone: ${escapeHtml(admin.phone)}</div>
+            <div class="small muted">Status: ${admin.isActive !== false ? 'Active' : 'Suspended'}</div>
+            <div class="section-actions">
+              <button class="ghost-btn" data-admin-edit="${admin.id}">Edit</button>
+              ${admin.id !== user.id ? `<button class="ghost-btn" data-admin-delete="${admin.id}">Delete</button>` : ''}
+              ${admin.isActive !== false ? `<button class="ghost-btn" data-admin-suspend="${admin.id}">Suspend</button>` : `<button class="ghost-btn" data-admin-activate="${admin.id}">Activate</button>`}
+            </div>
+          </div>
+        `).join('') : '<div class="muted">No admin accounts found.</div>'}
+      </div>
+    </section>
+    ` : ''}
+    
+    ${user.role === 'SUPER_ADMIN' ? `
+    <section class="card">
+      <strong>User Management</strong>
+      <div class="stack">
+        <div class="section-actions">
+          <input type="text" id="user-search" placeholder="Search users by name, phone, or email..." style="width: 100%; max-width: 400px; padding: 8px; margin-bottom: 10px;" />
+        </div>
+        <div id="user-list" class="stack">
+          ${allUsers.slice(0, 10).map((u) => `
+            <div class="notice">
+              <strong>${escapeHtml(u.fullName)} (${escapeHtml(u.role)})</strong>
+              <div class="small">Email: ${escapeHtml(u.email || 'N/A')}</div>
+              <div class="small muted">Phone: ${escapeHtml(u.phone)}</div>
+              <div class="small muted">Verification: ${escapeHtml(u.verificationStatus || 'Pending')}</div>
+              <div class="small muted">Status: ${u.isActive !== false ? 'Active' : 'Suspended'}</div>
+              ${u.role === 'PLAYER' ? `
+              <div class="section-actions">
+                ${u.isActive !== false ? `<button class="ghost-btn" data-user-suspend="${u.id}">Suspend</button>` : `<button class="ghost-btn" data-user-activate="${u.id}">Activate</button>`}
+              </div>
+              ` : ''}
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    </section>
+    ` : ''}
     
     ${['ADMIN', 'SUPER_ADMIN'].includes(user.role) ? `
     <section class="card">
@@ -1812,6 +1972,13 @@ function renderAdmin() {
       </div>
     </section>
     ` : ''}
+    
+    <section class="grid cols-4">
+      <div class="card"><strong>Total deposits</strong><div class="metric-value">${bootstrap.adminSummary?.totalDeposits || 0}</div><div class="metric-label">All time</div></div>
+      <div class="card"><strong>Pending deposits</strong><div class="metric-value">${depositQueue.length}</div><div class="metric-label">Awaiting approval</div></div>
+      <div class="card"><strong>Total withdrawals</strong><div class="metric-value">${bootstrap.adminSummary?.totalWithdrawals || 0}</div><div class="metric-label">All time</div></div>
+      <div class="card"><strong>Pending withdrawals</strong><div class="metric-value">${withdrawalQueue.length}</div><div class="metric-label">Awaiting approval</div></div>
+    </section>
     
     <section class="card">
       <strong>Pending Deposits (${depositQueue.length})</strong>
@@ -1850,6 +2017,34 @@ function renderAdmin() {
         `).join('') : '<div class="muted">No pending withdrawals.</div>'}
       </div>
     </section>
+    
+    ${['ADMIN', 'SUPER_ADMIN'].includes(user.role) ? `
+    <section class="card">
+      <strong>Payment Account Management</strong>
+      <div class="stack">
+        <div class="section-actions">
+          <button class="primary-btn" id="create-payment-method-btn">Add Payment Account</button>
+        </div>
+        <div class="grid cols-2">
+          <div class="metric"><div class="metric-value">${bootstrap.paymentMethods.filter(pm => pm.paymentType === 'bank' && pm.isActive).length}</div><div class="metric-label">Active Bank Accounts</div></div>
+          <div class="metric"><div class="metric-value">${bootstrap.paymentMethods.filter(pm => pm.paymentType === 'wallet' && pm.isActive).length}</div><div class="metric-label">Active Wallet Accounts</div></div>
+        </div>
+        ${bootstrap.paymentMethods.length ? bootstrap.paymentMethods.map((pm) => `
+          <div class="notice">
+            <strong>${escapeHtml(pm.name)} (${escapeHtml(pm.paymentType).toUpperCase()})</strong>
+            <div class="small">${pm.paymentType === 'bank' ? `Bank: ${escapeHtml(pm.bankName || 'N/A')}` : `Wallet: ${escapeHtml(pm.walletName || 'N/A')}`}</div>
+            <div class="small muted">Account: ${escapeHtml(pm.paymentType === 'bank' ? pm.accountNumber : pm.walletNumber)}</div>
+            <div class="small muted">Status: ${pm.isActive ? 'Active' : 'Inactive'}</div>
+            <div class="section-actions">
+              <button class="ghost-btn" data-payment-edit="${pm.id}">Edit</button>
+              <button class="ghost-btn" data-payment-toggle="${pm.id}">${pm.isActive ? 'Deactivate' : 'Activate'}</button>
+              <button class="ghost-btn" data-payment-delete="${pm.id}">Delete</button>
+            </div>
+          </div>
+        `).join('') : '<div class="muted">No payment accounts configured.</div>'}
+      </div>
+    </section>
+    ` : ''}
     
     ${user.role === 'SUPER_ADMIN' && financialSettings ? `
     <section class="card">
@@ -2131,14 +2326,28 @@ function renderAdmin() {
         <strong>Create payment method</strong>
         <form class="form" id="payment-method-form">
           <div class="row">
-            <div class="field"><label>Name</label><input name="name" placeholder="Bank Transfer" required /></div>
-            <div class="field"><label>Account name</label><input name="accountName" placeholder="TikWheel Account" required /></div>
+            <div class="field"><label>Name</label><input name="name" placeholder="Commercial Bank of Ethiopia" required /></div>
+            <div class="field">
+              <label>Type</label>
+              <select name="paymentType" required>
+                <option value="bank">Bank</option>
+                <option value="wallet">Mobile Wallet</option>
+              </select>
+            </div>
           </div>
           <div class="row">
-            <div class="field"><label>Account number</label><input name="accountNumber" placeholder="000-000-0000" required /></div>
-            <div class="field"><label>Reference hint</label><input name="referenceHint" placeholder="ROUND 001 - PLAYER 01" /></div>
+            <div class="field"><label>Account holder name</label><input name="accountName" placeholder="TikWheel PLC" required /></div>
+            <div class="field"><label>Account/Wallet number</label><input name="accountNumber" placeholder="1000123456789" required /></div>
           </div>
-          <div class="field"><label>Instructions</label><textarea name="instructions" placeholder="Explain how players should pay" required></textarea></div>
+          <div class="row">
+            <div class="field"><label>Display order</label><input name="displayOrder" type="number" value="0" required /></div>
+            <div class="field"><label>Reference hint</label><input name="referenceHint" placeholder="TikWheel Deposit" /></div>
+          </div>
+          <div class="field"><label>Instructions</label><textarea name="instructions" placeholder="Explain how players should make payments" required></textarea></div>
+          <label class="checkbox-row">
+            <input type="checkbox" name="isActive" checked />
+            <span>Active (visible to users)</span>
+          </label>
           <button class="primary-btn" type="submit">Save payment method</button>
         </form>
       </div>
@@ -2147,12 +2356,15 @@ function renderAdmin() {
         <div class="stack">
           ${(bootstrap.paymentMethods || []).length ? (bootstrap.paymentMethods || []).map((method) => `
             <div class="notice">
-              <strong>${escapeHtml(method.name)}</strong>
+              <strong>${escapeHtml(method.name)} (${escapeHtml(method.paymentType || 'bank').toUpperCase()})</strong>
               <div class="small">${escapeHtml(method.instructions)}</div>
-              <div class="small muted">${escapeHtml(method.accountName)} | ${escapeHtml(method.accountNumber)}</div>
+              <div class="small muted">Account: ${escapeHtml(method.accountName)} | ${escapeHtml(method.accountNumber)}</div>
+              <div class="small muted">Order: ${method.displayOrder || 0} | Reference: ${escapeHtml(method.referenceHint || 'N/A')}</div>
               <div class="section-actions">
                 <span class="status ${method.isActive ? '' : 'rejected'}">${method.isActive ? 'Active' : 'Inactive'}</span>
                 <button class="ghost-btn" data-toggle-payment-method="${escapeHtml(method.id)}">${method.isActive ? 'Disable' : 'Enable'}</button>
+                <button class="ghost-btn" data-edit-payment-method="${escapeHtml(method.id)}">Edit</button>
+                <button class="ghost-btn" data-delete-payment-method="${escapeHtml(method.id)}">Delete</button>
               </div>
             </div>
           `).join('') : '<div class="muted">No payment methods configured.</div>'}
@@ -2255,11 +2467,296 @@ function bindAdminForms() {
     });
   });
 
+  document.querySelectorAll('[data-edit-payment-method]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const id = button.dataset.editPaymentMethod;
+      const method = bootstrap.paymentMethods.find(m => m.id === id);
+      if (!method) return alert('Payment method not found');
+      
+      const name = prompt('Payment method name:', method.name);
+      if (!name) return;
+      
+      const instructions = prompt('Instructions:', method.instructions);
+      if (!instructions) return;
+      
+      const accountName = prompt('Account name:', method.accountName);
+      if (!accountName) return;
+      
+      const accountNumber = prompt('Account number:', method.accountNumber);
+      if (!accountNumber) return;
+      
+      const referenceHint = prompt('Reference hint:', method.referenceHint);
+      
+      try {
+        await postJson(`/api/admin/payment-methods/${encodeURIComponent(id)}`, { name, instructions, accountName, accountNumber, referenceHint });
+        alert('Payment method updated successfully');
+        location.reload();
+      } catch (error) {
+        alert('Failed to update payment method: ' + error.message);
+      }
+    });
+  });
+
+  // Admin management event handlers
+  document.getElementById('create-admin-btn')?.addEventListener('click', async () => {
+    const fullName = prompt('Full name:');
+    if (!fullName) return;
+    const phone = prompt('Phone:');
+    if (!phone) return;
+    const email = prompt('Email:');
+    if (!email) return;
+    const password = prompt('Password:');
+    if (!password) return;
+    const role = prompt('Role (ADMIN, SUPER_ADMIN, MONEY_ADMIN, GAME_ADMIN):', 'ADMIN');
+    if (!role) return;
+
+    try {
+      await postJson('/api/admin/admins', { fullName, phone, email, password, role });
+      alert('Admin created successfully');
+      location.reload();
+    } catch (error) {
+      alert('Failed to create admin: ' + error.message);
+    }
+  });
+
+  document.querySelectorAll('[data-admin-edit]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const adminId = button.dataset.adminEdit;
+      const admin = bootstrap.adminUsers.find(a => a.id === adminId);
+      if (!admin) return alert('Admin not found');
+
+      const role = prompt('New role (ADMIN, SUPER_ADMIN, MONEY_ADMIN, GAME_ADMIN):', admin.role);
+      if (!role) return;
+
+      try {
+        await postJson(`/api/admin/admins/${encodeURIComponent(adminId)}`, { role });
+        alert('Admin updated successfully');
+        location.reload();
+      } catch (error) {
+        alert('Failed to update admin: ' + error.message);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-admin-delete]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const adminId = button.dataset.adminDelete;
+      if (!confirm('Are you sure you want to delete this admin?')) return;
+
+      try {
+        await fetch(`/api/admin/admins/${encodeURIComponent(adminId)}`, { method: 'DELETE', credentials: 'include' });
+        alert('Admin deleted successfully');
+        location.reload();
+      } catch (error) {
+        alert('Failed to delete admin: ' + error.message);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-admin-suspend]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const adminId = button.dataset.adminSuspend;
+      if (!confirm('Are you sure you want to suspend this admin?')) return;
+      const reason = prompt('Reason for suspension (optional):', '');
+
+      try {
+        await postJson(`/api/admin/users/${encodeURIComponent(adminId)}/suspend`, { reason });
+        alert('Admin suspended successfully');
+        location.reload();
+      } catch (error) {
+        alert('Failed to suspend admin: ' + error.message);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-admin-activate]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const adminId = button.dataset.adminActivate;
+      try {
+        await postJson(`/api/admin/users/${encodeURIComponent(adminId)}/activate`, {});
+        alert('Admin activated successfully');
+        location.reload();
+      } catch (error) {
+        alert('Failed to activate admin: ' + error.message);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-user-suspend]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const userId = button.dataset.userSuspend;
+      if (!confirm('Are you sure you want to suspend this user?')) return;
+      const reason = prompt('Reason for suspension (optional):', '');
+
+      try {
+        await postJson(`/api/admin/users/${encodeURIComponent(userId)}/suspend`, { reason });
+        alert('User suspended successfully');
+        location.reload();
+      } catch (error) {
+        alert('Failed to suspend user: ' + error.message);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-user-activate]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const userId = button.dataset.userActivate;
+      try {
+        await postJson(`/api/admin/users/${encodeURIComponent(userId)}/activate`, {});
+        alert('User activated successfully');
+        location.reload();
+      } catch (error) {
+        alert('Failed to activate user: ' + error.message);
+      }
+    });
+  });
+
+  // Notification event handlers
+  document.querySelectorAll('[data-notification-read]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const notificationId = button.dataset.notificationRead;
+      try {
+        await postJson(`/api/notifications/${encodeURIComponent(notificationId)}/read`, {});
+        button.parentElement.classList.add('muted');
+        button.remove();
+      } catch (error) {
+        alert('Failed to mark notification as read: ' + error.message);
+      }
+    });
+  });
+
+  // Payment account management event handlers
+  document.getElementById('create-payment-method-btn')?.addEventListener('click', async () => {
+    const name = prompt('Payment account name:');
+    if (!name) return;
+    const paymentType = prompt('Payment type (bank/wallet):', 'bank');
+    if (!paymentType || !['bank', 'wallet'].includes(paymentType.toLowerCase())) {
+      alert('Invalid payment type. Use "bank" or "wallet"');
+      return;
+    }
+
+    let accountData = {};
+    if (paymentType.toLowerCase() === 'bank') {
+      accountData.bankName = prompt('Bank name:');
+      accountData.accountName = prompt('Account holder name:');
+      accountData.accountNumber = prompt('Account number:');
+    } else {
+      accountData.walletName = prompt('Wallet name:');
+      accountData.walletNumber = prompt('Wallet number:');
+    }
+
+    try {
+      await postJson('/api/admin/payment-methods', { name, paymentType, ...accountData, isActive: true });
+      alert('Payment account created successfully');
+      location.reload();
+    } catch (error) {
+      alert('Failed to create payment account: ' + error.message);
+    }
+  });
+
+  document.querySelectorAll('[data-payment-edit]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const paymentId = button.dataset.paymentEdit;
+      const method = bootstrap.paymentMethods.find(m => m.id === paymentId);
+      if (!method) return alert('Payment method not found');
+
+      const name = prompt('Payment account name:', method.name);
+      if (!name) return;
+
+      let updateData = { name };
+      if (method.paymentType === 'bank') {
+        updateData.bankName = prompt('Bank name:', method.bankName);
+        updateData.accountName = prompt('Account holder name:', method.accountName);
+        updateData.accountNumber = prompt('Account number:', method.accountNumber);
+      } else {
+        updateData.walletName = prompt('Wallet name:', method.walletName);
+        updateData.walletNumber = prompt('Wallet number:', method.walletNumber);
+      }
+
+      try {
+        await postJson(`/api/admin/payment-methods/${encodeURIComponent(paymentId)}`, updateData);
+        alert('Payment account updated successfully');
+        location.reload();
+      } catch (error) {
+        alert('Failed to update payment account: ' + error.message);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-payment-toggle]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const paymentId = button.dataset.paymentToggle;
+      try {
+        await postJson(`/api/admin/payment-methods/${encodeURIComponent(paymentId)}/toggle`, {});
+        alert('Payment account status toggled successfully');
+        location.reload();
+      } catch (error) {
+        alert('Failed to toggle payment account: ' + error.message);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-payment-delete]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const paymentId = button.dataset.paymentDelete;
+      if (!confirm('Are you sure you want to delete this payment account?')) return;
+
+      try {
+        await fetch(`/api/admin/payment-methods/${encodeURIComponent(paymentId)}`, { method: 'DELETE', credentials: 'include' });
+        alert('Payment account deleted successfully');
+        location.reload();
+      } catch (error) {
+        alert('Failed to delete payment account: ' + error.message);
+      }
+    });
+  });
+      
+      const accountName = prompt('Account holder name:', method.accountName);
+      if (!accountName) return;
+      
+      const accountNumber = prompt('Account/Wallet number:', method.accountNumber);
+      if (!accountNumber) return;
+      
+      const paymentType = prompt('Type (bank/wallet):', method.paymentType || 'bank');
+      const displayOrder = prompt('Display order:', method.displayOrder || 0);
+      const referenceHint = prompt('Reference hint:', method.referenceHint || '');
+      const instructions = prompt('Instructions:', method.instructions || '');
+      const isActive = confirm('Is this payment method active?');
+      
+      await putJson(`/api/admin/payment-methods/${encodeURIComponent(id)}`, {
+        name,
+        accountName,
+        accountNumber,
+        paymentType,
+        displayOrder: Number(displayOrder),
+        referenceHint,
+        instructions,
+        isActive
+      });
+      location.reload();
+    });
+  });
+
+  document.querySelectorAll('[data-delete-payment-method]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const id = button.dataset.deletePaymentMethod;
+      if (!confirm('Are you sure you want to delete this payment method?')) return;
+      
+      await fetch(`/api/admin/payment-methods/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        credentials: 'include'
+      });
+      location.reload();
+    });
+  });
+
   const paymentMethodForm = document.querySelector('#payment-method-form');
   if (paymentMethodForm) {
     paymentMethodForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       const data = Object.fromEntries(new FormData(paymentMethodForm).entries());
+      data.isActive = data.isActive === 'on' || data.isActive === true;
+      data.displayOrder = Number(data.displayOrder);
       await postJson('/api/admin/payment-methods', data);
       location.reload();
     });
