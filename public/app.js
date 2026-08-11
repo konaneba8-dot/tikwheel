@@ -408,7 +408,7 @@ function bindAuthForms() {
       event.preventDefault();
       const form = new FormData(loginForm);
       await postJson('/api/auth/login', Object.fromEntries(form.entries()));
-      location.reload();
+      location.href = '/dashboard';
     });
   }
 
@@ -421,7 +421,7 @@ function bindAuthForms() {
       payload.acceptTerms = form.get('acceptTerms') === 'on';
       payload.acceptRules = form.get('acceptRules') === 'on';
       await postJson('/api/auth/register', payload);
-      location.reload();
+      location.href = '/dashboard';
     });
   }
 
@@ -1885,7 +1885,7 @@ function renderAdmin() {
   const pendingVerifications = bootstrap.pendingVerifications || [];
   const financialSettings = bootstrap.financialSettings || null;
 
-  if (!user || !['ADMIN', 'SUPER_ADMIN', 'MONEY_ADMIN', 'GAME_ADMIN'].includes(user.role)) {
+  if (!user || !['ADMIN', 'SUPER_ADMIN', 'MONEY_ADMIN', 'GAME_ADMIN', 'WITHDRAWAL_ADMIN'].includes(user.role)) {
     app.innerHTML = `
       <section class="hero">
         <div class="eyebrow">Admin access required</div>
@@ -1929,6 +1929,28 @@ function renderAdmin() {
       <div class="card"><strong>Pending payments</strong><div class="metric-value">${bootstrap.adminSummary?.pendingPayments ?? 0}</div><div class="metric-label">Waiting review</div></div>
     </section>
     
+    ${['SUPER_ADMIN', 'MONEY_ADMIN'].includes(user.role) ? `
+    <section class="card">
+      <strong>Financial Summary</strong>
+      <div class="grid cols-4">
+        <div class="card"><strong>Total Deposits</strong><div class="metric-value">${bootstrap.adminSummary?.financial?.totalDeposits ?? 0} ETB</div><div class="metric-label">Total amount deposited</div></div>
+        <div class="card"><strong>Total Withdrawals</strong><div class="metric-value">${bootstrap.adminSummary?.financial?.totalWithdrawals ?? 0} ETB</div><div class="metric-label">Total amount withdrawn</div></div>
+        <div class="card"><strong>Total Wallet Balance</strong><div class="metric-value">${bootstrap.adminSummary?.financial?.totalWalletBalance ?? 0} ETB</div><div class="metric-label">All user wallets</div></div>
+        <div class="card"><strong>Net Balance</strong><div class="metric-value">${bootstrap.adminSummary?.financial?.netBalance ?? 0} ETB</div><div class="metric-label">Deposits - Withdrawals - Prizes</div></div>
+      </div>
+      <div class="grid cols-4">
+        <div class="card"><strong>Pending Deposits</strong><div class="metric-value">${bootstrap.adminSummary?.financial?.pendingDeposits ?? 0}</div><div class="metric-label">Awaiting approval</div></div>
+        <div class="card"><strong>Pending Withdrawals</strong><div class="metric-value">${bootstrap.adminSummary?.financial?.pendingWithdrawals ?? 0}</div><div class="metric-label">Awaiting approval</div></div>
+        <div class="card"><strong>Approved Withdrawals</strong><div class="metric-value">${bootstrap.adminSummary?.financial?.approvedWithdrawals ?? 0}</div><div class="metric-label">Ready for payment</div></div>
+        <div class="card"><strong>Processing Withdrawals</strong><div class="metric-value">${bootstrap.adminSummary?.financial?.processingWithdrawals ?? 0}</div><div class="metric-label">Currently processing</div></div>
+      </div>
+      <div class="grid cols-2">
+        <div class="card"><strong>Total Prizes Paid</strong><div class="metric-value">${bootstrap.adminSummary?.financial?.totalPrizesPaid ?? 0} ETB</div><div class="metric-label">Winnings credited</div></div>
+        <div class="card"><strong>Pending Verifications</strong><div class="metric-value">${bootstrap.adminSummary?.pendingVerifications ?? 0}</div><div class="metric-label">Users awaiting verification</div></div>
+      </div>
+    </section>
+    ` : ''}
+    
     ${user.role === 'SUPER_ADMIN' ? `
     <section class="card">
       <strong>Admin Management (${adminUsers.length})</strong>
@@ -1955,10 +1977,11 @@ function renderAdmin() {
     
     ${user.role === 'SUPER_ADMIN' ? `
     <section class="card">
-      <strong>User Management</strong>
+      <strong>User Management (${allUsers.length} total)</strong>
       <div class="stack">
         <div class="section-actions">
           <input type="text" id="user-search" placeholder="Search users by name, phone, or email..." style="width: 100%; max-width: 400px; padding: 8px; margin-bottom: 10px;" />
+          <button class="ghost-btn" id="load-more-users">Load More</button>
         </div>
         <div id="user-list" class="stack">
           ${allUsers.slice(0, 10).map((u) => `
@@ -1968,11 +1991,12 @@ function renderAdmin() {
               <div class="small muted">Phone: ${escapeHtml(u.phone)}</div>
               <div class="small muted">Verification: ${escapeHtml(u.verificationStatus || 'Pending')}</div>
               <div class="small muted">Status: ${u.isActive !== false ? 'Active' : 'Suspended'}</div>
-              ${u.role === 'PLAYER' ? `
+              <div class="small muted">Wallet Balance: ${(bootstrap.wallets || []).find(w => w.userId === u.id)?.balance || 0} ETB</div>
+              <div class="small muted">Joined: ${escapeHtml(u.createdAt || '')}</div>
               <div class="section-actions">
                 ${u.isActive !== false ? `<button class="ghost-btn" data-user-suspend="${u.id}">Suspend</button>` : `<button class="ghost-btn" data-user-activate="${u.id}">Activate</button>`}
+                ${u.role !== 'SUPER_ADMIN' ? `<button class="ghost-btn" data-user-edit="${u.id}">Edit Role</button>` : ''}
               </div>
-              ` : ''}
             </div>
           `).join('')}
         </div>
@@ -1980,7 +2004,7 @@ function renderAdmin() {
     </section>
     ` : ''}
     
-    ${['ADMIN', 'SUPER_ADMIN'].includes(user.role) ? `
+    ${['ADMIN', 'SUPER_ADMIN', 'MONEY_ADMIN'].includes(user.role) ? `
     <section class="card">
       <strong>Pending User Verifications (${pendingVerifications.length})</strong>
       <div class="stack">
@@ -2007,6 +2031,7 @@ function renderAdmin() {
       <div class="card"><strong>Pending withdrawals</strong><div class="metric-value">${withdrawalQueue.length}</div><div class="metric-label">Awaiting approval</div></div>
     </section>
     
+    ${['ADMIN', 'SUPER_ADMIN', 'MONEY_ADMIN'].includes(user.role) ? `
     <section class="card">
       <strong>Pending Deposits (${depositQueue.length})</strong>
       <div class="stack">
@@ -2016,7 +2041,6 @@ function renderAdmin() {
             <div class="small">Amount: ${deposit.amount} ETB | Status: ${escapeHtml(deposit.status)}</div>
             <div class="small muted">Payment Method: ${escapeHtml(deposit.paymentMethod || 'N/A')}</div>
             <div class="small muted">Referral: ${escapeHtml(deposit.referralNumber || 'None')}</div>
-            ${deposit.idDocumentUrl ? `<div class="small"><a href="${escapeHtml(deposit.idDocumentUrl)}" target="_blank">View ID Document</a></div>` : ''}
             ${deposit.receiptUrl ? `<div class="small"><a href="${escapeHtml(deposit.receiptUrl)}" target="_blank">View Receipt</a></div>` : ''}
             <div class="section-actions">
               <button class="action-btn" data-deposit-approve="${deposit.id}">Approve</button>
@@ -2026,7 +2050,9 @@ function renderAdmin() {
         `).join('') : '<div class="muted">No pending deposits.</div>'}
       </div>
     </section>
+    ` : ''}
     
+    ${['ADMIN', 'SUPER_ADMIN', 'MONEY_ADMIN', 'WITHDRAWAL_ADMIN'].includes(user.role) ? `
     <section class="card">
       <strong>Pending Withdrawals (${withdrawalQueue.length})</strong>
       <div class="stack">
@@ -2037,39 +2063,51 @@ function renderAdmin() {
             <div class="small muted">Account: ${escapeHtml(withdrawal.paymentDetails?.accountName || '')} - ${escapeHtml(withdrawal.paymentDetails?.accountNumber || '')}</div>
             <div class="small muted">Method: ${escapeHtml(withdrawal.paymentMethod || 'N/A')}</div>
             <div class="section-actions">
-              <button class="action-btn" data-withdrawal-approve="${withdrawal.id}">Approve</button>
-              <button class="ghost-btn" data-withdrawal-reject="${withdrawal.id}">Reject</button>
+              ${['ADMIN', 'SUPER_ADMIN', 'MONEY_ADMIN'].includes(user.role) && withdrawal.status === 'PENDING' ? `
+                <button class="action-btn" data-withdrawal-approve="${withdrawal.id}">Approve</button>
+                <button class="ghost-btn" data-withdrawal-reject="${withdrawal.id}">Reject</button>
+              ` : ''}
+              ${['ADMIN', 'SUPER_ADMIN', 'MONEY_ADMIN'].includes(user.role) && withdrawal.status === 'APPROVED' ? `
+                <button class="action-btn" data-withdrawal-ready="${withdrawal.id}">Ready for Payment</button>
+              ` : ''}
+              ${['ADMIN', 'SUPER_ADMIN', 'WITHDRAWAL_ADMIN'].includes(user.role) && withdrawal.status === 'READY_FOR_PAYMENT' ? `
+                <button class="action-btn" data-withdrawal-process="${withdrawal.id}">Process Payment</button>
+              ` : ''}
+              ${['ADMIN', 'SUPER_ADMIN', 'WITHDRAWAL_ADMIN'].includes(user.role) && withdrawal.status === 'PROCESSING' ? `
+                <button class="action-btn" data-withdrawal-paid="${withdrawal.id}">Mark as Paid</button>
+              ` : ''}
             </div>
           </div>
         `).join('') : '<div class="muted">No pending withdrawals.</div>'}
       </div>
     </section>
+    ` : ''}
     
     ${['ADMIN', 'SUPER_ADMIN', 'MONEY_ADMIN'].includes(user.role) ? `
     <section class="card">
-      <strong>Payment Account Management</strong>
+      <strong>Payment Method Management</strong>
       <div class="stack">
         <div class="section-actions">
-          <button class="primary-btn" id="create-payment-account-btn">Add Payment Account</button>
+          <button class="primary-btn" id="create-payment-method-btn">Add Payment Method</button>
         </div>
         <div class="grid cols-2">
-          <div class="metric"><div class="metric-value">${(bootstrap.paymentAccounts || []).filter(acc => acc.type === 'BANK' && acc.active).length}</div><div class="metric-label">Active Bank Accounts</div></div>
-          <div class="metric"><div class="metric-value">${(bootstrap.paymentAccounts || []).filter(acc => acc.type === 'WALLET' && acc.active).length}</div><div class="metric-label">Active Wallet Accounts</div></div>
+          <div class="metric"><div class="metric-value">${(bootstrap.paymentMethods || []).filter(pm => pm.paymentType === 'bank' && pm.isActive).length}</div><div class="metric-label">Active Bank Methods</div></div>
+          <div class="metric"><div class="metric-value">${(bootstrap.paymentMethods || []).filter(pm => pm.paymentType === 'wallet' && pm.isActive).length}</div><div class="metric-label">Active Wallet Methods</div></div>
         </div>
-        ${(bootstrap.paymentAccounts || []).length ? (bootstrap.paymentAccounts || []).map((acc) => `
+        ${(bootstrap.paymentMethods || []).length ? (bootstrap.paymentMethods || []).map((pm) => `
           <div class="notice">
-            <strong>${acc.type === 'BANK' ? escapeHtml(acc.bankName) : 'Mobile Wallet'} (${escapeHtml(acc.type)})</strong>
-            <div class="small">Account Name: ${escapeHtml(acc.accountName)}</div>
-            <div class="small muted">Account Number: ${escapeHtml(acc.accountNumber)}</div>
-            <div class="small muted">Status: ${acc.active ? 'Active' : 'Inactive'}</div>
-            <div class="small muted">Display Order: ${acc.displayOrder}</div>
+            <strong>${escapeHtml(pm.name)} (${escapeHtml(pm.paymentType)})</strong>
+            <div class="small">${pm.paymentType === 'bank' ? `Bank: ${escapeHtml(pm.bankName)}` : `Wallet: ${escapeHtml(pm.walletName)}`}</div>
+            <div class="small muted">Account: ${escapeHtml(pm.accountName)} - ${escapeHtml(pm.accountNumber)}</div>
+            <div class="small muted">Status: ${pm.isActive ? 'Active' : 'Inactive'}</div>
+            <div class="small muted">Display Order: ${pm.displayOrder}</div>
             <div class="section-actions">
-              <button class="ghost-btn" data-payment-account-edit="${acc.id}">Edit</button>
-              <button class="ghost-btn" data-payment-account-toggle="${acc.id}">${acc.active ? 'Deactivate' : 'Activate'}</button>
-              ${user.role === 'SUPER_ADMIN' ? `<button class="ghost-btn" data-payment-account-delete="${acc.id}">Delete</button>` : ''}
+              <button class="ghost-btn" data-payment-method-edit="${pm.id}">Edit</button>
+              <button class="ghost-btn" data-payment-method-toggle="${pm.id}">${pm.isActive ? 'Deactivate' : 'Activate'}</button>
+              ${user.role === 'SUPER_ADMIN' ? `<button class="ghost-btn" data-payment-method-delete="${pm.id}">Delete</button>` : ''}
             </div>
           </div>
-        `).join('') : '<div class="muted">No payment accounts configured.</div>'}
+        `).join('') : '<div class="muted">No payment methods configured.</div>'}
       </div>
     </section>
     ` : ''}
@@ -2495,94 +2533,109 @@ function bindAdminForms() {
     });
   });
 
-  // Payment account management handlers
-  document.getElementById('create-payment-account-btn')?.addEventListener('click', async () => {
-    const type = prompt('Account type (BANK or WALLET):', 'BANK');
-    if (!type) return;
+  // Payment method management handlers
+  document.getElementById('create-payment-method-btn')?.addEventListener('click', async () => {
+    const paymentType = prompt('Payment type (bank or wallet):', 'bank');
+    if (!paymentType) return;
+    const name = prompt('Payment method name (e.g., CBE Bank, Telebirr):');
+    if (!name) return;
     const accountName = prompt('Account holder name:');
     if (!accountName) return;
     const accountNumber = prompt('Account number:');
     if (!accountNumber) return;
     let bankName = '';
-    if (type.toUpperCase() === 'BANK') {
+    let walletName = '';
+    if (paymentType.toLowerCase() === 'bank') {
       bankName = prompt('Bank name:');
       if (!bankName) return;
+    } else {
+      walletName = prompt('Wallet name:');
+      if (!walletName) return;
     }
     const displayOrder = prompt('Display order (number, lower appears first):', '0');
 
     try {
-      await postJson('/api/admin/payment-accounts', {
-        type: type.toUpperCase(),
+      await postJson('/api/admin/payment-methods', {
+        paymentType: paymentType.toLowerCase(),
+        name,
         accountName,
         accountNumber,
-        bankName: type.toUpperCase() === 'BANK' ? bankName : '',
+        bankName: paymentType.toLowerCase() === 'bank' ? bankName : '',
+        walletName: paymentType.toLowerCase() === 'wallet' ? walletName : '',
         displayOrder: Number(displayOrder) || 0,
-        active: true,
+        isActive: true,
       });
       location.reload();
     } catch (error) {
-      alert('Failed to create payment account: ' + error.message);
+      alert('Failed to create payment method: ' + error.message);
     }
   });
 
-  document.querySelectorAll('[data-payment-account-edit]').forEach((button) => {
+  document.querySelectorAll('[data-payment-method-edit]').forEach((button) => {
     button.addEventListener('click', async () => {
-      const accountId = button.dataset.paymentAccountEdit;
-      const account = (state.bootstrap.paymentAccounts || []).find(acc => acc.id === accountId);
-      if (!account) return;
+      const paymentMethodId = button.dataset.paymentMethodEdit;
+      const paymentMethod = bootstrap.paymentMethods?.find((pm) => pm.id === paymentMethodId);
+      if (!paymentMethod) return;
 
-      const accountName = prompt('Account holder name:', account.accountName);
+      const name = prompt('Payment method name:', paymentMethod.name);
+      if (name === null) return;
+      const accountName = prompt('Account holder name:', paymentMethod.accountName);
       if (accountName === null) return;
-      const accountNumber = prompt('Account number:', account.accountNumber);
+      const accountNumber = prompt('Account number:', paymentMethod.accountNumber);
       if (accountNumber === null) return;
-      let bankName = account.bankName;
-      if (account.type === 'BANK') {
-        bankName = prompt('Bank name:', account.bankName);
+      let bankName = paymentMethod.bankName || '';
+      let walletName = paymentMethod.walletName || '';
+      if (paymentMethod.paymentType === 'bank') {
+        bankName = prompt('Bank name:', bankName);
         if (bankName === null) return;
+      } else {
+        walletName = prompt('Wallet name:', walletName);
+        if (walletName === null) return;
       }
-      const displayOrder = prompt('Display order:', account.displayOrder);
+      const displayOrder = prompt('Display order:', String(paymentMethod.displayOrder || 0));
       if (displayOrder === null) return;
 
       try {
-        await postJson(`/api/admin/payment-accounts/${encodeURIComponent(accountId)}`, {
+        await postJson(`/api/admin/payment-methods/${encodeURIComponent(paymentMethodId)}`, {
+          name,
           accountName,
           accountNumber,
           bankName,
+          walletName,
           displayOrder: Number(displayOrder) || 0,
         }, 'PUT');
         location.reload();
       } catch (error) {
-        alert('Failed to update payment account: ' + error.message);
+        alert('Failed to update payment method: ' + error.message);
       }
     });
   });
 
-  document.querySelectorAll('[data-payment-account-toggle]').forEach((button) => {
+  document.querySelectorAll('[data-payment-method-toggle]').forEach((button) => {
     button.addEventListener('click', async () => {
-      const accountId = button.dataset.paymentAccountToggle;
-      const account = (state.bootstrap.paymentAccounts || []).find(acc => acc.id === accountId);
-      if (!account) return;
+      const paymentMethodId = button.dataset.paymentMethodToggle;
+      const paymentMethod = bootstrap.paymentMethods?.find((pm) => pm.id === paymentMethodId);
+      if (!paymentMethod) return;
 
-      const action = account.active ? 'deactivate' : 'activate';
       try {
-        await postJson(`/api/admin/payment-accounts/${encodeURIComponent(accountId)}/${action}`, {});
+        await postJson(`/api/admin/payment-methods/${encodeURIComponent(paymentMethodId)}/toggle`, {});
         location.reload();
       } catch (error) {
-        alert('Failed to toggle payment account: ' + error.message);
+        alert('Failed to toggle payment method: ' + error.message);
       }
     });
   });
 
-  document.querySelectorAll('[data-payment-account-delete]').forEach((button) => {
+  document.querySelectorAll('[data-payment-method-delete]').forEach((button) => {
     button.addEventListener('click', async () => {
-      const accountId = button.dataset.paymentAccountDelete;
-      if (!confirm('Are you sure you want to delete this payment account?')) return;
+      const paymentMethodId = button.dataset.paymentMethodDelete;
+      if (!confirm('Are you sure you want to delete this payment method?')) return;
 
       try {
-        await postJson(`/api/admin/payment-accounts/${encodeURIComponent(accountId)}`, {}, 'DELETE');
+        await postJson(`/api/admin/payment-methods/${encodeURIComponent(paymentMethodId)}`, {}, 'DELETE');
         location.reload();
       } catch (error) {
-        alert('Failed to delete payment account: ' + error.message);
+        alert('Failed to delete payment method: ' + error.message);
       }
     });
   });
@@ -2729,6 +2782,115 @@ function bindAdminForms() {
         alert('Failed to activate user: ' + error.message);
       }
     });
+  });
+
+  document.querySelectorAll('[data-user-edit]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const userId = button.dataset.userEdit;
+      const user = bootstrap.users.find(u => u.id === userId);
+      if (!user) return;
+
+      const newRole = prompt(`Current role: ${user.role}\n\nEnter new role (PLAYER, ADMIN, MONEY_ADMIN, GAME_ADMIN, WITHDRAWAL_ADMIN):`, user.role);
+      if (!newRole) return;
+
+      const validRoles = ['PLAYER', 'ADMIN', 'MONEY_ADMIN', 'GAME_ADMIN', 'WITHDRAWAL_ADMIN'];
+      if (!validRoles.includes(newRole.toUpperCase())) {
+        alert('Invalid role. Please use one of: ' + validRoles.join(', '));
+        return;
+      }
+
+      try {
+        await postJson(`/api/admin/admins/${encodeURIComponent(userId)}`, { role: newRole.toUpperCase() }, 'PUT');
+        alert('User role updated successfully');
+        location.reload();
+      } catch (error) {
+        alert('Failed to update user role: ' + error.message);
+      }
+    });
+  });
+
+  document.getElementById('load-more-users')?.addEventListener('click', () => {
+    const userList = document.getElementById('user-list');
+    const currentCount = userList.children.length;
+    const moreUsers = bootstrap.users.slice(currentCount, currentCount + 10);
+    
+    moreUsers.forEach((u) => {
+      const userDiv = document.createElement('div');
+      userDiv.className = 'notice';
+      userDiv.innerHTML = `
+        <strong>${escapeHtml(u.fullName)} (${escapeHtml(u.role)})</strong>
+        <div class="small">Email: ${escapeHtml(u.email || 'N/A')}</div>
+        <div class="small muted">Phone: ${escapeHtml(u.phone)}</div>
+        <div class="small muted">Verification: ${escapeHtml(u.verificationStatus || 'Pending')}</div>
+        <div class="small muted">Status: ${u.isActive !== false ? 'Active' : 'Suspended'}</div>
+        <div class="small muted">Wallet Balance: ${(bootstrap.wallets || []).find(w => w.userId === u.id)?.balance || 0} ETB</div>
+        <div class="small muted">Joined: ${escapeHtml(u.createdAt || '')}</div>
+        <div class="section-actions">
+          ${u.isActive !== false ? `<button class="ghost-btn" data-user-suspend="${u.id}">Suspend</button>` : `<button class="ghost-btn" data-user-activate="${u.id}">Activate</button>`}
+          ${u.role !== 'SUPER_ADMIN' ? `<button class="ghost-btn" data-user-edit="${u.id}">Edit Role</button>` : ''}
+        </div>
+      `;
+      userList.appendChild(userDiv);
+    });
+
+    // Re-attach event listeners for new buttons
+    document.querySelectorAll('[data-user-suspend]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const userId = button.dataset.userSuspend;
+        if (!confirm('Are you sure you want to suspend this user?')) return;
+        const reason = prompt('Reason for suspension (optional):', '');
+
+        try {
+          await postJson(`/api/admin/users/${encodeURIComponent(userId)}/suspend`, { reason });
+          alert('User suspended successfully');
+          location.reload();
+        } catch (error) {
+          alert('Failed to suspend user: ' + error.message);
+        }
+      });
+    });
+
+    document.querySelectorAll('[data-user-activate]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const userId = button.dataset.userActivate;
+        try {
+          await postJson(`/api/admin/users/${encodeURIComponent(userId)}/activate`, {});
+          alert('User activated successfully');
+          location.reload();
+        } catch (error) {
+          alert('Failed to activate user: ' + error.message);
+        }
+      });
+    });
+
+    document.querySelectorAll('[data-user-edit]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const userId = button.dataset.userEdit;
+        const user = bootstrap.users.find(u => u.id === userId);
+        if (!user) return;
+
+        const newRole = prompt(`Current role: ${user.role}\n\nEnter new role (PLAYER, ADMIN, MONEY_ADMIN, GAME_ADMIN, WITHDRAWAL_ADMIN):`, user.role);
+        if (!newRole) return;
+
+        const validRoles = ['PLAYER', 'ADMIN', 'MONEY_ADMIN', 'GAME_ADMIN', 'WITHDRAWAL_ADMIN'];
+        if (!validRoles.includes(newRole.toUpperCase())) {
+          alert('Invalid role. Please use one of: ' + validRoles.join(', '));
+          return;
+        }
+
+        try {
+          await postJson(`/api/admin/admins/${encodeURIComponent(userId)}`, { role: newRole.toUpperCase() }, 'PUT');
+          alert('User role updated successfully');
+          location.reload();
+        } catch (error) {
+          alert('Failed to update user role: ' + error.message);
+        }
+      });
+    });
+
+    if (currentCount + 10 >= bootstrap.users.length) {
+      document.getElementById('load-more-users').style.display = 'none';
+    }
   });
 
   // Notification event handlers
@@ -2892,6 +3054,34 @@ function bindAdminForms() {
       const reason = prompt('Enter rejection reason:');
       if (!reason) return;
       await postJson(`/api/admin/withdrawals/${encodeURIComponent(id)}/reject`, { reason });
+      location.reload();
+    });
+  });
+
+  document.querySelectorAll('[data-withdrawal-ready]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const id = button.dataset.withdrawalReady;
+      if (!confirm('Mark this withdrawal as ready for payment?')) return;
+      await postJson(`/api/admin/withdrawals/${encodeURIComponent(id)}/ready-for-payment`, {});
+      location.reload();
+    });
+  });
+
+  document.querySelectorAll('[data-withdrawal-process]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const id = button.dataset.withdrawalProcess;
+      if (!confirm('Process this withdrawal payment?')) return;
+      await postJson(`/api/admin/withdrawals/${encodeURIComponent(id)}/process`, {});
+      location.reload();
+    });
+  });
+
+  document.querySelectorAll('[data-withdrawal-paid]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const id = button.dataset.withdrawalPaid;
+      const transferProof = prompt('Enter transfer proof (transaction ID/reference):');
+      if (!transferProof) return;
+      await postJson(`/api/admin/withdrawals/${encodeURIComponent(id)}/paid`, { transferProof });
       location.reload();
     });
   });
