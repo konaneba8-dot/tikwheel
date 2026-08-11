@@ -2111,7 +2111,37 @@ function renderAdmin() {
       </div>
     </section>
     ` : ''}
-    
+
+    ${['ADMIN', 'SUPER_ADMIN', 'MONEY_ADMIN'].includes(user.role) ? `
+    <section class="card">
+      <strong>Payment Account Management (Bank & Wallet)</strong>
+      <div class="stack">
+        <div class="section-actions">
+          <button class="primary-btn" id="create-payment-account-btn">Add Payment Account</button>
+        </div>
+        <div class="grid cols-2">
+          <div class="metric"><div class="metric-value">${(bootstrap.activePaymentAccounts || []).filter(acc => acc.type === 'BANK').length}</div><div class="metric-label">Active Bank Accounts</div></div>
+          <div class="metric"><div class="metric-value">${(bootstrap.activePaymentAccounts || []).filter(acc => acc.type === 'WALLET').length}</div><div class="metric-label">Active Wallet Accounts</div></div>
+        </div>
+        ${(bootstrap.paymentAccounts || []).length ? (bootstrap.paymentAccounts || []).map((acc) => `
+          <div class="notice">
+            <strong>${acc.type === 'BANK' ? escapeHtml(acc.bankName) : 'Mobile Wallet'} (${escapeHtml(acc.type)})</strong>
+            <div class="small">Account Name: ${escapeHtml(acc.accountName)}</div>
+            <div class="small muted">Account Number: ${escapeHtml(acc.accountNumber)}</div>
+            ${acc.type === 'BANK' ? `<div class="small muted">Bank: ${escapeHtml(acc.bankName)}</div>` : ''}
+            <div class="small muted">Status: ${acc.active ? 'Active' : 'Inactive'}</div>
+            <div class="small muted">Display Order: ${acc.displayOrder}</div>
+            <div class="section-actions">
+              <button class="ghost-btn" data-payment-account-edit="${acc.id}">Edit</button>
+              <button class="ghost-btn" data-payment-account-toggle="${acc.id}">${acc.active ? 'Deactivate' : 'Activate'}</button>
+              ${user.role === 'SUPER_ADMIN' ? `<button class="ghost-btn" data-payment-account-delete="${acc.id}">Delete</button>` : ''}
+            </div>
+          </div>
+        `).join('') : '<div class="muted">No payment accounts configured.</div>'}
+      </div>
+    </section>
+    ` : ''}
+
     ${user.role === 'SUPER_ADMIN' && financialSettings ? `
     <section class="card">
       <strong>Financial Settings</strong>
@@ -2670,6 +2700,108 @@ function bindAdminForms() {
     });
   });
 
+  // Payment account management event handlers
+  document.getElementById('create-payment-account-btn')?.addEventListener('click', async () => {
+    const type = prompt('Account type (BANK or WALLET):', 'BANK');
+    if (!type) return;
+    if (type !== 'BANK' && type !== 'WALLET') {
+      alert('Type must be BANK or WALLET');
+      return;
+    }
+    const accountName = prompt('Account holder name:');
+    if (!accountName) return;
+    const accountNumber = prompt('Account number:');
+    if (!accountNumber) return;
+    let bankName = '';
+    if (type === 'BANK') {
+      bankName = prompt('Bank name:');
+      if (!bankName) return;
+    }
+    const displayOrder = prompt('Display order:', '0');
+
+    try {
+      await postJson('/api/admin/payment-accounts', {
+        type,
+        accountName,
+        accountNumber,
+        bankName,
+        displayOrder: Number(displayOrder) || 0,
+      });
+      alert('Payment account created successfully');
+      location.reload();
+    } catch (error) {
+      alert('Failed to create payment account: ' + error.message);
+    }
+  });
+
+  document.querySelectorAll('[data-payment-account-edit]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const accountId = button.dataset.paymentAccountEdit;
+      const account = bootstrap.paymentAccounts?.find((acc) => acc.id === accountId);
+      if (!account) return;
+
+      const type = prompt('Account type (BANK or WALLET):', account.type);
+      if (type === null) return;
+      if (type !== 'BANK' && type !== 'WALLET') {
+        alert('Type must be BANK or WALLET');
+        return;
+      }
+      const accountName = prompt('Account holder name:', account.accountName);
+      if (accountName === null) return;
+      const accountNumber = prompt('Account number:', account.accountNumber);
+      if (accountNumber === null) return;
+      let bankName = account.bankName || '';
+      if (type === 'BANK') {
+        bankName = prompt('Bank name:', bankName);
+        if (bankName === null) return;
+      }
+      const displayOrder = prompt('Display order:', String(account.displayOrder || 0));
+      if (displayOrder === null) return;
+
+      try {
+        await postJson(`/api/admin/payment-accounts/${encodeURIComponent(accountId)}`, {
+          type,
+          accountName,
+          accountNumber,
+          bankName,
+          displayOrder: Number(displayOrder) || 0,
+        }, 'PUT');
+        location.reload();
+      } catch (error) {
+        alert('Failed to update payment account: ' + error.message);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-payment-account-toggle]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const accountId = button.dataset.paymentAccountToggle;
+      const account = bootstrap.paymentAccounts?.find((acc) => acc.id === accountId);
+      if (!account) return;
+
+      try {
+        await postJson(`/api/admin/payment-accounts/${encodeURIComponent(accountId)}/toggle`, {});
+        location.reload();
+      } catch (error) {
+        alert('Failed to toggle payment account: ' + error.message);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-payment-account-delete]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const accountId = button.dataset.paymentAccountDelete;
+      if (!confirm('Are you sure you want to delete this payment account?')) return;
+
+      try {
+        await postJson(`/api/admin/payment-accounts/${encodeURIComponent(accountId)}`, {}, 'DELETE');
+        location.reload();
+      } catch (error) {
+        alert('Failed to delete payment account: ' + error.message);
+      }
+    });
+  });
+
   // Admin management event handlers
   document.getElementById('create-admin-btn')?.addEventListener('click', async () => {
     const fullName = prompt('Full name:');
@@ -2813,7 +2945,7 @@ function bindAdminForms() {
     const userList = document.getElementById('user-list');
     const currentCount = userList.children.length;
     const moreUsers = bootstrap.users.slice(currentCount, currentCount + 10);
-    
+
     moreUsers.forEach((u) => {
       const userDiv = document.createElement('div');
       userDiv.className = 'notice';
