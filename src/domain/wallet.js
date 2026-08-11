@@ -86,12 +86,79 @@ export function approveWithdrawalTransaction(transaction, wallet) {
     throw new Error('Transaction is not a withdrawal');
   }
 
-  if (transaction.status === TRANSACTION_STATUSES.COMPLETED) {
-    throw new Error('Transaction already completed');
+  if (transaction.status !== TRANSACTION_STATUSES.PENDING) {
+    throw new Error('Only pending withdrawals can be approved');
   }
 
   if (wallet.balance < transaction.amount) {
     throw new Error('Insufficient wallet balance');
+  }
+
+  transaction.status = TRANSACTION_STATUSES.APPROVED;
+  transaction.updatedAt = new Date().toISOString();
+
+  return { transaction, wallet };
+}
+
+export function markWithdrawalReadyForPayment(transaction) {
+  if (transaction.type !== TRANSACTION_TYPES.WITHDRAW) {
+    throw new Error('Transaction is not a withdrawal');
+  }
+
+  if (transaction.status !== TRANSACTION_STATUSES.APPROVED) {
+    throw new Error('Only approved withdrawals can be marked ready for payment');
+  }
+
+  transaction.status = TRANSACTION_STATUSES.READY_FOR_PAYMENT;
+  transaction.updatedAt = new Date().toISOString();
+
+  return transaction;
+}
+
+export function markWithdrawalProcessing(transaction) {
+  if (transaction.type !== TRANSACTION_TYPES.WITHDRAW) {
+    throw new Error('Transaction is not a withdrawal');
+  }
+
+  if (transaction.status !== TRANSACTION_STATUSES.READY_FOR_PAYMENT) {
+    throw new Error('Only withdrawals ready for payment can be marked as processing');
+  }
+
+  transaction.status = TRANSACTION_STATUSES.PROCESSING;
+  transaction.updatedAt = new Date().toISOString();
+
+  return transaction;
+}
+
+export function markWithdrawalPaid(transaction, transferProof) {
+  if (transaction.type !== TRANSACTION_TYPES.WITHDRAW) {
+    throw new Error('Transaction is not a withdrawal');
+  }
+
+  if (transaction.status !== TRANSACTION_STATUSES.PROCESSING) {
+    throw new Error('Only processing withdrawals can be marked as paid');
+  }
+
+  // Double payment prevention
+  if (transaction.status === TRANSACTION_STATUSES.PAID || transaction.status === TRANSACTION_STATUSES.COMPLETED) {
+    throw new Error('Withdrawal has already been paid. Cannot pay again.');
+  }
+
+  transaction.status = TRANSACTION_STATUSES.PAID;
+  transaction.transferProof = transferProof || {};
+  transaction.paidAt = new Date().toISOString();
+  transaction.updatedAt = new Date().toISOString();
+
+  return transaction;
+}
+
+export function completeWithdrawalTransaction(transaction, wallet) {
+  if (transaction.type !== TRANSACTION_TYPES.WITHDRAW) {
+    throw new Error('Transaction is not a withdrawal');
+  }
+
+  if (transaction.status !== TRANSACTION_STATUSES.PAID) {
+    throw new Error('Only paid withdrawals can be completed');
   }
 
   transaction.status = TRANSACTION_STATUSES.COMPLETED;

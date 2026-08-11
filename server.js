@@ -5,38 +5,29 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { PORT, SESSION_COOKIE, OAUTH_CONFIG } from './src/config.js';
 import { parseCookies, serializeCookie, verifySignedToken } from './src/lib/security.js';
+import { readState } from './src/lib/store.js';
 import formidable from 'formidable';
 import {
-  activateUser,
-  approveUserVerification,
   approveWithdrawal,
   bootstrapState,
   changeRoundStatus,
   completeDraw,
   completeDeposit,
-  completeSocialSignup,
-  createAdmin,
   createDeposit,
   createGameTypeAction,
   createLiveBroadcast,
+  createPaymentAccountService,
   createPaymentMethodAction,
   createPromotionCampaign,
   createRound,
   createWithdrawal,
-  deleteAdmin,
-  deletePaymentMethodAction,
+  deactivatePaymentAccountService,
+  deletePaymentAccount,
   drawRound,
-  editPaymentMethodAction,
-  getAdminPaymentMethods,
   getAuditLog,
-  getBroadcastStreamConfig,
-  getDepositQueue,
-  getFinancialSettings,
   getHistory,
   getLiveBroadcastDashboard,
-  getNotifications,
   getPaymentMethods,
-  getPendingVerifications,
   getPromotionDashboard,
   getRoundAuditTrail,
   getRound,
@@ -45,21 +36,15 @@ import {
   getWalletDashboard,
   getWithdrawalQueue,
   joinRound,
-  listAdmins,
   login,
-  markNotificationRead,
-  rejectDeposit,
   rejectPayment,
-  rejectUserVerification,
   rejectWithdrawal,
   registerPlayer,
   resolveUserFromCookie,
-  suspendUser,
   toggleLiveBroadcast,
   togglePaymentMethodAction,
   trackPromotionEvent,
-  updateAdmin,
-  updateFinancialSettings,
+  updatePaymentAccountService,
   verifyPayment,
 } from './src/services/app-service.js';
 import { renderAdminPage, renderAuditPage, renderDashboardPage, renderGameRulesPage, renderHistoryDetailPage, renderHistoryPage, renderHomePage, renderLivePage, renderLivestreamPage, renderLoginPage, renderRoundPage, renderTermsPage, renderWalletPage } from './src/views/pages.js';
@@ -78,7 +63,7 @@ const mimeTypes = {
   '.webp': 'image/webp',
 };
 
-function startServer(port) {
+function startServer(port, isFirstAttempt = true) {
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     try {
@@ -116,7 +101,7 @@ function startServer(port) {
     if (error.code === 'EADDRINUSE') {
       const nextPort = port + 1;
       console.warn(`Port ${port} is in use. Retrying on ${nextPort}...`);
-      startServer(nextPort);
+      startServer(nextPort, false);
       return;
     }
 
@@ -128,7 +113,26 @@ function startServer(port) {
   });
 }
 
-startServer(PORT);
+async function checkSuperAdminSetup() {
+  try {
+    const state = await readState();
+    const superAdminExists = state.users?.some(user => user.role === 'SUPER_ADMIN');
+
+    if (!superAdminExists) {
+      console.log('⚠️  WARNING: No Super Admin exists.');
+      console.log(`   To create the Super Admin account, register with email: konaneba8@gmail.com`);
+      console.log(`   Or use POST /api/setup-super-admin with { fullName, phone, email: "konaneba8@gmail.com", password }`);
+    } else {
+      console.log('✓ Super Admin account exists');
+    }
+  } catch (error) {
+    console.error('Error checking Super Admin setup:', error.message);
+  }
+}
+
+checkSuperAdminSetup().catch(console.error);
+
+startServer(PORT, true);
 
 async function handlePage(req, res, url) {
   const user = await currentUser(req);
@@ -286,16 +290,19 @@ async function handleApi(req, res, url) {
 
   if (req.method === 'GET' && url.pathname === '/api/admin/payment-methods') {
     if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (!['SUPER_ADMIN', 'ADMIN', 'MONEY_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
     return sendJson(res, 200, await getAdminPaymentMethods(user));
   }
 
   if (req.method === 'GET' && url.pathname === '/api/admin/promotions') {
     if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (!['SUPER_ADMIN', 'ADMIN', 'GAME_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
     return sendJson(res, 200, await getPromotionDashboard(user));
   }
 
   if (req.method === 'GET' && url.pathname === '/api/admin/live-broadcast') {
     if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (!['SUPER_ADMIN', 'ADMIN', 'GAME_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
     return sendJson(res, 200, await getLiveBroadcastDashboard(user));
   }
 
@@ -306,28 +313,64 @@ async function handleApi(req, res, url) {
 
   if (req.method === 'GET' && url.pathname === '/api/admin/withdrawals') {
     if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (!['SUPER_ADMIN', 'MONEY_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
     return sendJson(res, 200, await getWithdrawalQueue(user));
   }
 
   if (req.method === 'GET' && url.pathname === '/api/admin/deposits') {
     if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (!['SUPER_ADMIN', 'MONEY_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
     return sendJson(res, 200, await getDepositQueue(user));
   }
 
   if (req.method === 'GET' && url.pathname === '/api/admin/verifications') {
     if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (!['SUPER_ADMIN', 'MONEY_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
     return sendJson(res, 200, await getPendingVerifications(user));
   }
 
   if (req.method === 'GET' && url.pathname === '/api/admin/financial-settings') {
     if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (user.role !== 'SUPER_ADMIN') return sendJson(res, 403, { error: 'Forbidden' });
     return sendJson(res, 200, await getFinancialSettings(user));
   }
 
-  const broadcastConfigMatch = url.pathname.match(/^\/api\/broadcasts\/([^/]+)\/config$/);
-  if (req.method === 'GET' && broadcastConfigMatch) {
-    const broadcastId = decodeURIComponent(broadcastConfigMatch[1]);
-    return sendJson(res, 200, await getBroadcastConfig(broadcastId));
+  if (req.method === 'POST' && url.pathname === '/api/admin/payment-accounts') {
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (!['SUPER_ADMIN', 'ADMIN', 'MONEY_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
+    return sendJson(res, 200, await createPaymentAccountService(body || {}, user));
+  }
+
+  const paymentAccountEditMatch = url.pathname.match(/^\/api\/admin\/payment-accounts\/([^/]+)$/);
+  if (req.method === 'PUT' && paymentAccountEditMatch) {
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (!['SUPER_ADMIN', 'ADMIN', 'MONEY_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
+    const accountId = decodeURIComponent(paymentAccountEditMatch[1]);
+    return sendJson(res, 200, await updatePaymentAccountService(accountId, body || {}, user));
+  }
+
+  const paymentAccountActivateMatch = url.pathname.match(/^\/api\/admin\/payment-accounts\/([^/]+)\/activate$/);
+  if (req.method === 'POST' && paymentAccountActivateMatch) {
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (!['SUPER_ADMIN', 'ADMIN', 'MONEY_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
+    const accountId = decodeURIComponent(paymentAccountActivateMatch[1]);
+    return sendJson(res, 200, await activatePaymentAccountService(accountId, user));
+  }
+
+  const paymentAccountDeactivateMatch = url.pathname.match(/^\/api\/admin\/payment-accounts\/([^/]+)\/deactivate$/);
+  if (req.method === 'POST' && paymentAccountDeactivateMatch) {
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (!['SUPER_ADMIN', 'ADMIN', 'MONEY_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
+    const accountId = decodeURIComponent(paymentAccountDeactivateMatch[1]);
+    return sendJson(res, 200, await deactivatePaymentAccountService(accountId, user));
+  }
+
+  const paymentAccountDeleteMatch = url.pathname.match(/^\/api\/admin\/payment-accounts\/([^/]+)$/);
+  if (req.method === 'DELETE' && paymentAccountDeleteMatch) {
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (user.role !== 'SUPER_ADMIN') return sendJson(res, 403, { error: 'Forbidden' });
+    const accountId = decodeURIComponent(paymentAccountDeleteMatch[1]);
+    return sendJson(res, 200, await deletePaymentAccount(accountId, user));
   }
 
   const roundMatch = url.pathname.match(/^\/api\/rounds\/([^/]+)$/);
@@ -368,42 +411,60 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { user: result.user });
   }
 
+  if (req.method === 'POST' && url.pathname === '/api/setup-super-admin') {
+    const result = await setupSuperAdmin(body || {});
+    setAuthCookie(res, result.token);
+    return sendJson(res, 200, { user: result.user });
+  }
+
   // File upload endpoint for receipts
   if (req.method === 'POST' && url.pathname === '/api/upload/receipt') {
     return handleFileUpload(req, res);
   }
 
   if (req.method === 'POST' && url.pathname === '/api/admin/game-types') {
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (!['SUPER_ADMIN', 'GAME_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
     return sendJson(res, 200, await createGameTypeAction(body || {}, user));
   }
 
   if (req.method === 'POST' && url.pathname === '/api/admin/payment-methods') {
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (!['SUPER_ADMIN', 'ADMIN', 'MONEY_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
     return sendJson(res, 200, await createPaymentMethodAction(body || {}, user));
   }
 
   const paymentMethodEditMatch = url.pathname.match(/^\/api\/admin\/payment-methods\/([^/]+)$/);
   if (req.method === 'PUT' && paymentMethodEditMatch) {
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (!['SUPER_ADMIN', 'ADMIN', 'MONEY_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
     const paymentMethodId = decodeURIComponent(paymentMethodEditMatch[1]);
     return sendJson(res, 200, await editPaymentMethodAction(paymentMethodId, body || {}, user));
   }
 
   const paymentMethodDeleteMatch = url.pathname.match(/^\/api\/admin\/payment-methods\/([^/]+)$/);
   if (req.method === 'DELETE' && paymentMethodDeleteMatch) {
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (!['SUPER_ADMIN', 'ADMIN', 'MONEY_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
     const paymentMethodId = decodeURIComponent(paymentMethodDeleteMatch[1]);
     return sendJson(res, 200, await deletePaymentMethodAction(paymentMethodId, user));
   }
 
   if (req.method === 'POST' && url.pathname === '/api/admin/rounds') {
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (!['SUPER_ADMIN', 'GAME_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
     return sendJson(res, 200, await createRound(body || {}, user));
   }
 
   if (req.method === 'POST' && url.pathname === '/api/admin/promotions') {
     if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (!['SUPER_ADMIN', 'GAME_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
     return sendJson(res, 200, await createPromotionCampaign(body || {}, user));
   }
 
   if (req.method === 'POST' && url.pathname === '/api/admin/live-broadcast') {
     if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (!['SUPER_ADMIN', 'GAME_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
     return sendJson(res, 200, await createLiveBroadcast(body || {}, user));
   }
 
@@ -411,6 +472,7 @@ async function handleApi(req, res, url) {
   if (req.method === 'POST' && liveBroadcastActionMatch) {
     const broadcastId = decodeURIComponent(liveBroadcastActionMatch[1]);
     if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (!['SUPER_ADMIN', 'GAME_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
     return sendJson(res, 200, await toggleLiveBroadcast(broadcastId, liveBroadcastActionMatch[2], user));
   }
 
@@ -428,6 +490,7 @@ async function handleApi(req, res, url) {
   if (req.method === 'POST' && depositCompleteMatch) {
     const transactionId = decodeURIComponent(depositCompleteMatch[1]);
     if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (!['SUPER_ADMIN', 'MONEY_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
     return sendJson(res, 200, await completeDeposit(transactionId, user));
   }
 
@@ -435,6 +498,7 @@ async function handleApi(req, res, url) {
   if (req.method === 'POST' && depositRejectMatch) {
     const transactionId = decodeURIComponent(depositRejectMatch[1]);
     if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (!['SUPER_ADMIN', 'MONEY_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
     return sendJson(res, 200, await rejectDeposit(transactionId, body?.reason || 'Rejected by admin', user));
   }
 
@@ -442,6 +506,7 @@ async function handleApi(req, res, url) {
   if (req.method === 'POST' && withdrawalApproveMatch) {
     const transactionId = decodeURIComponent(withdrawalApproveMatch[1]);
     if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (!['SUPER_ADMIN', 'MONEY_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
     return sendJson(res, 200, await approveWithdrawal(transactionId, user));
   }
 
@@ -449,7 +514,39 @@ async function handleApi(req, res, url) {
   if (req.method === 'POST' && withdrawalRejectMatch) {
     const transactionId = decodeURIComponent(withdrawalRejectMatch[1]);
     if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (!['SUPER_ADMIN', 'MONEY_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
     return sendJson(res, 200, await rejectWithdrawal(transactionId, body?.reason || 'Rejected by admin', user));
+  }
+
+  const withdrawalReadyMatch = url.pathname.match(/^\/api\/admin\/withdrawals\/([^/]+)\/ready$/);
+  if (req.method === 'POST' && withdrawalReadyMatch) {
+    const transactionId = decodeURIComponent(withdrawalReadyMatch[1]);
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (!['SUPER_ADMIN', 'MONEY_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
+    return sendJson(res, 200, await setWithdrawalReadyForPayment(transactionId, user));
+  }
+
+  const withdrawalProcessingMatch = url.pathname.match(/^\/api\/admin\/withdrawals\/([^/]+)\/processing$/);
+  if (req.method === 'POST' && withdrawalProcessingMatch) {
+    const transactionId = decodeURIComponent(withdrawalProcessingMatch[1]);
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (!['SUPER_ADMIN', 'MONEY_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
+    return sendJson(res, 200, await setWithdrawalProcessing(transactionId, user));
+  }
+
+  const withdrawalPaidMatch = url.pathname.match(/^\/api\/admin\/withdrawals\/([^/]+)\/paid$/);
+  if (req.method === 'POST' && withdrawalPaidMatch) {
+    const transactionId = decodeURIComponent(withdrawalPaidMatch[1]);
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (!['SUPER_ADMIN', 'MONEY_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
+    return sendJson(res, 200, await setWithdrawalPaid(transactionId, body?.transferProof || {}, user));
+  }
+
+  const withdrawalCompleteMatch = url.pathname.match(/^\/api\/admin\/withdrawals\/([^/]+)\/complete$/);
+  if (req.method === 'POST' && withdrawalCompleteMatch) {
+    const transactionId = decodeURIComponent(withdrawalCompleteMatch[1]);
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    return sendJson(res, 200, await completeWithdrawal(transactionId, user));
   }
 
   const promotionTrackMatch = url.pathname.match(/^\/api\/admin\/promotions\/([^/]+)\/track$/);
@@ -464,56 +561,78 @@ async function handleApi(req, res, url) {
   const userVerificationApproveMatch = url.pathname.match(/^\/api\/admin\/verifications\/([^/]+)\/approve$/);
   if (req.method === 'POST' && userVerificationApproveMatch) {
     const userId = decodeURIComponent(userVerificationApproveMatch[1]);
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (!['SUPER_ADMIN', 'MONEY_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
     return sendJson(res, 200, await approveUserVerification(userId, user));
   }
 
   const userVerificationRejectMatch = url.pathname.match(/^\/api\/admin\/verifications\/([^/]+)\/reject$/);
   if (req.method === 'POST' && userVerificationRejectMatch) {
     const userId = decodeURIComponent(userVerificationRejectMatch[1]);
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (!['SUPER_ADMIN', 'MONEY_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
     return sendJson(res, 200, await rejectUserVerification(userId, body?.reason || 'Verification rejected', user));
   }
 
   // Admin management endpoints
   if (req.method === 'GET' && url.pathname === '/api/admin/admins') {
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (user.role !== 'SUPER_ADMIN') return sendJson(res, 403, { error: 'Forbidden' });
     return sendJson(res, 200, await listAdmins(user));
   }
 
   if (req.method === 'POST' && url.pathname === '/api/admin/admins') {
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (user.role !== 'SUPER_ADMIN') return sendJson(res, 403, { error: 'Forbidden' });
     return sendJson(res, 200, await createAdmin(body || {}, user));
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/admin/super-admin') {
+    return sendJson(res, 200, await createSuperAdmin(body || {}, user));
   }
 
   const adminUpdateMatch = url.pathname.match(/^\/api\/admin\/admins\/([^/]+)$/);
   if (req.method === 'PUT' && adminUpdateMatch) {
     const adminId = decodeURIComponent(adminUpdateMatch[1]);
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (user.role !== 'SUPER_ADMIN') return sendJson(res, 403, { error: 'Forbidden' });
     return sendJson(res, 200, await updateAdmin(adminId, body || {}, user));
   }
 
   const adminDeleteMatch = url.pathname.match(/^\/api\/admin\/admins\/([^/]+)$/);
   if (req.method === 'DELETE' && adminDeleteMatch) {
     const adminId = decodeURIComponent(adminDeleteMatch[1]);
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (user.role !== 'SUPER_ADMIN') return sendJson(res, 403, { error: 'Forbidden' });
     return sendJson(res, 200, await deleteAdmin(adminId, user));
   }
 
   const userSuspendMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)\/suspend$/);
   if (req.method === 'POST' && userSuspendMatch) {
     const userId = decodeURIComponent(userSuspendMatch[1]);
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (user.role !== 'SUPER_ADMIN') return sendJson(res, 403, { error: 'Forbidden' });
     return sendJson(res, 200, await suspendUser(userId, user));
   }
 
   const userActivateMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)\/activate$/);
   if (req.method === 'POST' && userActivateMatch) {
     const userId = decodeURIComponent(userActivateMatch[1]);
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
+    if (user.role !== 'SUPER_ADMIN') return sendJson(res, 403, { error: 'Forbidden' });
     return sendJson(res, 200, await activateUser(userId, user));
   }
 
   // Notification endpoints
   if (req.method === 'GET' && url.pathname === '/api/notifications') {
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
     return sendJson(res, 200, await getNotifications(user));
   }
 
   const notificationReadMatch = url.pathname.match(/^\/api\/notifications\/([^/]+)\/read$/);
   if (req.method === 'POST' && notificationReadMatch) {
     const notificationId = decodeURIComponent(notificationReadMatch[1]);
+    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
     return sendJson(res, 200, await markNotificationRead(notificationId, user));
   }
 

@@ -1175,8 +1175,8 @@ function renderWallet() {
             <label>Payment Method</label>
             <select id="withdraw-payment-method" required>
               <option value="">Select method</option>
-              <option value="bank_transfer">Bank Transfer</option>
-              <option value="mobile_wallet">Mobile Wallet</option>
+              <option value="bank">Bank Transfer</option>
+              <option value="wallet">Mobile Wallet</option>
             </select>
           </div>
           <button class="ghost-btn" id="withdraw-step-1-back">Back</button>
@@ -1187,16 +1187,16 @@ function renderWallet() {
         <div class="stack">
           <p class="muted">Step 3 of 6: Enter Required Details</p>
           <div class="field">
-            <label>Account Name</label>
+            <label>Bank/Wallet Name</label>
+            <input id="withdraw-bank-wallet-name" required placeholder="e.g., Commercial Bank of Ethiopia, Telebirr" />
+          </div>
+          <div class="field">
+            <label>Account Holder Name</label>
             <input id="withdraw-account-name" required placeholder="Account holder name" />
           </div>
           <div class="field">
-            <label>Account Number</label>
+            <label>Account/Wallet Number</label>
             <input id="withdraw-account-number" required placeholder="Bank account or wallet number" />
-          </div>
-          <div class="field">
-            <label>Bank Name (optional)</label>
-            <input id="withdraw-bank-name" placeholder="Bank name" />
           </div>
           <button class="ghost-btn" id="withdraw-step-2-back">Back</button>
           <button class="primary-btn" id="withdraw-step-2-next">Next</button>
@@ -1204,39 +1204,42 @@ function renderWallet() {
       </div>
       <div id="withdraw-step-3" style="display: none;">
         <div class="stack">
-          <p class="muted">Step 4 of 6: Review Details</p>
+          <p class="muted">Step 3 of 5: Review Details</p>
           <div class="notice">
             <strong>Review Your Withdrawal</strong>
             <div class="small">Amount: <span id="review-withdraw-amount"></span> ETB</div>
-            <div class="small">Account: <span id="review-withdraw-account"></span></div>
+            <div class="small">Bank/Wallet: <span id="review-withdraw-bank-wallet"></span></div>
+            <div class="small">Account Holder: <span id="review-withdraw-account-name"></span></div>
+            <div class="small">Account Number: <span id="review-withdraw-account-number"></span></div>
             <div class="small">Method: <span id="review-withdraw-method"></span></div>
           </div>
           <button class="ghost-btn" id="withdraw-step-3-back">Back</button>
-          <button class="primary-btn" id="withdraw-step-3-next">Confirm</button>
+          <button class="primary-btn" id="withdraw-step-3-next">Confirm Withdrawal</button>
         </div>
       </div>
       <div id="withdraw-step-4" style="display: none;">
         <div class="stack">
-          <p class="muted">Step 5 of 6: Confirm Withdrawal</p>
+          <p class="muted">Step 4 of 5: Confirm Withdrawal</p>
           <div class="notice">
             <strong>Are you sure you want to withdraw?</strong>
             <div class="small muted">This action cannot be undone.</div>
             <div class="small">Amount: <span id="confirm-withdraw-amount"></span> ETB</div>
-            <div class="small">To: <span id="confirm-withdraw-account"></span></div>
+            <div class="small">Bank/Wallet: <span id="confirm-withdraw-bank-wallet"></span></div>
+            <div class="small">Account: <span id="confirm-withdraw-account"></span></div>
           </div>
           <button class="ghost-btn" id="withdraw-step-4-back">Back</button>
-          <button class="primary-btn" id="withdraw-step-4-confirm">Confirm Withdrawal</button>
+          <button class="primary-btn" id="withdraw-step-4-confirm">Submit Withdrawal</button>
         </div>
       </div>
       <div id="withdraw-step-5" style="display: none;">
         <div class="stack">
-          <p class="muted">Step 6 of 6: Withdrawal Submitted</p>
+          <p class="muted">Step 5 of 5: Withdrawal Submitted</p>
           <div class="notice">
             <strong>Withdrawal Submitted Successfully!</strong>
             <div class="small muted">Your withdrawal is now pending admin approval.</div>
             <div class="small muted">Status: Pending</div>
           </div>
-          <button class="primary-btn" id="withdraw-step-5-done">Done</button>
+          <button class="primary-btn" id="withdraw-step-5-done">View Wallet</button>
         </div>
       </div>
     </section>
@@ -1301,23 +1304,27 @@ function renderWallet() {
     const paymentType = e.target.value;
     const paymentMethodSelect = document.getElementById('deposit-payment-method');
     const hintDiv = document.getElementById('payment-method-hint');
-    
+
     // Clear existing options
     paymentMethodSelect.innerHTML = '<option value="">Select payment account</option>';
-    
+
     if (paymentType) {
-      const filteredMethods = bootstrap.paymentMethods.filter(pm => 
-        pm.isActive && pm.paymentType === paymentType
+      const typeUpper = paymentType.toUpperCase();
+      const filteredAccounts = (bootstrap.activePaymentAccounts || []).filter(acc =>
+        acc.type === typeUpper
       );
-      
-      if (filteredMethods.length > 0) {
-        filteredMethods.forEach(pm => {
+
+      if (filteredAccounts.length > 0) {
+        filteredAccounts.forEach(acc => {
           const option = document.createElement('option');
-          option.value = pm.id;
-          option.textContent = pm.name;
+          option.value = acc.id;
+          const displayName = acc.type === 'BANK'
+            ? `${acc.bankName} - ${acc.accountName} (${acc.accountNumber})`
+            : `${acc.accountName} - ${acc.accountNumber}`;
+          option.textContent = displayName;
           paymentMethodSelect.appendChild(option);
         });
-        hintDiv.textContent = `Found ${filteredMethods.length} ${paymentType} account(s)`;
+        hintDiv.textContent = `Found ${filteredAccounts.length} ${paymentType} account(s)`;
       } else {
         hintDiv.textContent = `No active ${paymentType} accounts available`;
       }
@@ -1329,7 +1336,7 @@ function renderWallet() {
   document.getElementById('deposit-step-1-next')?.addEventListener('click', () => {
     const paymentType = document.getElementById('deposit-payment-type').value;
     const paymentMethod = document.getElementById('deposit-payment-method').value;
-    
+
     if (!paymentType) {
       alert('Please select a payment type');
       return;
@@ -1338,41 +1345,40 @@ function renderWallet() {
       alert('Please select a payment account');
       return;
     }
-    
+
     state.depositData.paymentType = paymentType;
     state.depositData.paymentMethod = paymentMethod;
-    
-    // Load payment method details
-    const selectedMethod = bootstrap.paymentMethods.find(pm => pm.id === paymentMethod);
-    if (selectedMethod) {
+
+    // Load payment account details from new payment accounts structure
+    const selectedAccount = (bootstrap.activePaymentAccounts || []).find(acc => acc.id === paymentMethod);
+    if (selectedAccount) {
       const accountDetailsDiv = document.getElementById('payment-account-details');
-      const isBank = selectedMethod.paymentType === 'bank';
-      
+      const isBank = selectedAccount.type === 'BANK';
+
       let accountDetails = '';
       if (isBank) {
         accountDetails = `
-          <div class="small"><strong>${escapeHtml(selectedMethod.bankName || selectedMethod.name)}</strong></div>
-          <div class="small">Account Name: ${escapeHtml(selectedMethod.accountName)}</div>
-          <div class="small">Account Number: <span id="account-number-display">${escapeHtml(selectedMethod.accountNumber)}</span> <button class="ghost-btn" id="copy-account-number" style="font-size: 0.8em; padding: 2px 8px;">Copy</button></div>
+          <div class="small"><strong>${escapeHtml(selectedAccount.bankName)}</strong></div>
+          <div class="small">Account Name: ${escapeHtml(selectedAccount.accountName)}</div>
+          <div class="small">Account Number: <span id="account-number-display">${escapeHtml(selectedAccount.accountNumber)}</span> <button class="ghost-btn" id="copy-account-number" style="font-size: 0.8em; padding: 2px 8px;">Copy</button></div>
         `;
       } else {
         accountDetails = `
-          <div class="small"><strong>${escapeHtml(selectedMethod.walletName || selectedMethod.name)}</strong></div>
-          <div class="small">Wallet Name: ${escapeHtml(selectedMethod.walletName)}</div>
-          <div class="small">Wallet Number: <span id="account-number-display">${escapeHtml(selectedMethod.walletNumber)}</span> <button class="ghost-btn" id="copy-account-number" style="font-size: 0.8em; padding: 2px 8px;">Copy</button></div>
+          <div class="small"><strong>Mobile Wallet</strong></div>
+          <div class="small">Account Name: ${escapeHtml(selectedAccount.accountName)}</div>
+          <div class="small">Wallet Number: <span id="account-number-display">${escapeHtml(selectedAccount.accountNumber)}</span> <button class="ghost-btn" id="copy-account-number" style="font-size: 0.8em; padding: 2px 8px;">Copy</button></div>
         `;
       }
-      
+
       accountDetailsDiv.innerHTML = `
         <strong>Payment Account Information</strong>
         <div class="small muted">Please transfer funds to the following account:</div>
         ${accountDetails}
       `;
-      
+
       // Add copy functionality
       document.getElementById('copy-account-number')?.addEventListener('click', () => {
-        const accountNumber = isBank ? selectedMethod.accountNumber : selectedMethod.walletNumber;
-        navigator.clipboard.writeText(accountNumber).then(() => {
+        navigator.clipboard.writeText(selectedAccount.accountNumber).then(() => {
           alert('Account number copied to clipboard!');
         }).catch(() => {
           alert('Failed to copy account number');
@@ -1384,7 +1390,7 @@ function renderWallet() {
         <div class="small muted">No payment account details available.</div>
       `;
     }
-    
+
     state.depositStep = 2;
     showDepositStep(2);
   });
@@ -1615,17 +1621,18 @@ function renderWallet() {
   });
 
   document.getElementById('withdraw-step-2-next')?.addEventListener('click', () => {
+    const bankWalletName = document.getElementById('withdraw-bank-wallet-name').value;
     const accountName = document.getElementById('withdraw-account-name').value;
     const accountNumber = document.getElementById('withdraw-account-number').value;
 
-    if (!accountName || !accountNumber) {
-      alert('Account name and account number are required');
+    if (!bankWalletName || !accountName || !accountNumber) {
+      alert('Please fill in all required fields');
       return;
     }
 
+    state.withdrawData.bankWalletName = bankWalletName;
     state.withdrawData.accountName = accountName;
     state.withdrawData.accountNumber = accountNumber;
-    state.withdrawData.bankName = document.getElementById('withdraw-bank-name').value;
     state.withdrawStep = 3;
     showWithdrawStep(3);
   });
@@ -1637,8 +1644,18 @@ function renderWallet() {
   });
 
   document.getElementById('withdraw-step-3-next')?.addEventListener('click', () => {
+    document.getElementById('review-withdraw-amount').textContent = state.withdrawData.amount;
+    document.getElementById('review-withdraw-bank-wallet').textContent = state.withdrawData.bankWalletName;
+    document.getElementById('review-withdraw-account-name').textContent = state.withdrawData.accountName;
+    document.getElementById('review-withdraw-account-number').textContent = state.withdrawData.accountNumber;
+    document.getElementById('review-withdraw-method').textContent = state.withdrawData.paymentMethod === 'bank' ? 'Bank Transfer' : 'Mobile Wallet';
     state.withdrawStep = 4;
     showWithdrawStep(4);
+  });
+
+  document.getElementById('withdraw-step-4-back')?.addEventListener('click', () => {
+    state.withdrawStep = 3;
+    showWithdrawStep(3);
   });
 
   // Withdrawal Step 4: Confirm Withdrawal
@@ -1647,14 +1664,22 @@ function renderWallet() {
     showWithdrawStep(3);
   });
 
-  document.getElementById('withdraw-step-4-confirm')?.addEventListener('click', async () => {
+  document.getElementById('withdraw-step-4-confirm')?.addEventListener('click', () => {
+    document.getElementById('confirm-withdraw-amount').textContent = state.withdrawData.amount;
+    document.getElementById('confirm-withdraw-bank-wallet').textContent = state.withdrawData.bankWalletName;
+    document.getElementById('confirm-withdraw-account').textContent = `${state.withdrawData.accountName} - ${state.withdrawData.accountNumber}`;
+    state.withdrawStep = 5;
+    showWithdrawStep(5);
+  });
+
+  document.getElementById('withdraw-step-5-done')?.addEventListener('click', async () => {
     const data = {
       amount: state.withdrawData.amount,
       paymentDetails: {
         paymentMethod: state.withdrawData.paymentMethod,
+        bankName: state.withdrawData.bankWalletName,
         accountName: state.withdrawData.accountName,
         accountNumber: state.withdrawData.accountNumber,
-        bankName: state.withdrawData.bankName,
       },
     };
 
@@ -1665,13 +1690,15 @@ function renderWallet() {
         credentials: 'include',
         body: JSON.stringify(data),
       });
-      const result = await response.json();
-      if (response.ok) {
-        state.withdrawStep = 5;
-        showWithdrawStep(5);
-      } else {
-        alert(result.error || 'Withdrawal failed');
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Withdrawal failed');
       }
+
+      const result = await response.json();
+      alert('Withdrawal submitted successfully!');
+      location.reload();
     } catch (error) {
       alert('Withdrawal failed: ' + error.message);
     }
@@ -2018,27 +2045,28 @@ function renderAdmin() {
       </div>
     </section>
     
-    ${['ADMIN', 'SUPER_ADMIN'].includes(user.role) ? `
+    ${['ADMIN', 'SUPER_ADMIN', 'MONEY_ADMIN'].includes(user.role) ? `
     <section class="card">
       <strong>Payment Account Management</strong>
       <div class="stack">
         <div class="section-actions">
-          <button class="primary-btn" id="create-payment-method-btn">Add Payment Account</button>
+          <button class="primary-btn" id="create-payment-account-btn">Add Payment Account</button>
         </div>
         <div class="grid cols-2">
-          <div class="metric"><div class="metric-value">${bootstrap.paymentMethods.filter(pm => pm.paymentType === 'bank' && pm.isActive).length}</div><div class="metric-label">Active Bank Accounts</div></div>
-          <div class="metric"><div class="metric-value">${bootstrap.paymentMethods.filter(pm => pm.paymentType === 'wallet' && pm.isActive).length}</div><div class="metric-label">Active Wallet Accounts</div></div>
+          <div class="metric"><div class="metric-value">${(bootstrap.paymentAccounts || []).filter(acc => acc.type === 'BANK' && acc.active).length}</div><div class="metric-label">Active Bank Accounts</div></div>
+          <div class="metric"><div class="metric-value">${(bootstrap.paymentAccounts || []).filter(acc => acc.type === 'WALLET' && acc.active).length}</div><div class="metric-label">Active Wallet Accounts</div></div>
         </div>
-        ${bootstrap.paymentMethods.length ? bootstrap.paymentMethods.map((pm) => `
+        ${(bootstrap.paymentAccounts || []).length ? (bootstrap.paymentAccounts || []).map((acc) => `
           <div class="notice">
-            <strong>${escapeHtml(pm.name)} (${escapeHtml(pm.paymentType).toUpperCase()})</strong>
-            <div class="small">${pm.paymentType === 'bank' ? `Bank: ${escapeHtml(pm.bankName || 'N/A')}` : `Wallet: ${escapeHtml(pm.walletName || 'N/A')}`}</div>
-            <div class="small muted">Account: ${escapeHtml(pm.paymentType === 'bank' ? pm.accountNumber : pm.walletNumber)}</div>
-            <div class="small muted">Status: ${pm.isActive ? 'Active' : 'Inactive'}</div>
+            <strong>${acc.type === 'BANK' ? escapeHtml(acc.bankName) : 'Mobile Wallet'} (${escapeHtml(acc.type)})</strong>
+            <div class="small">Account Name: ${escapeHtml(acc.accountName)}</div>
+            <div class="small muted">Account Number: ${escapeHtml(acc.accountNumber)}</div>
+            <div class="small muted">Status: ${acc.active ? 'Active' : 'Inactive'}</div>
+            <div class="small muted">Display Order: ${acc.displayOrder}</div>
             <div class="section-actions">
-              <button class="ghost-btn" data-payment-edit="${pm.id}">Edit</button>
-              <button class="ghost-btn" data-payment-toggle="${pm.id}">${pm.isActive ? 'Deactivate' : 'Activate'}</button>
-              <button class="ghost-btn" data-payment-delete="${pm.id}">Delete</button>
+              <button class="ghost-btn" data-payment-account-edit="${acc.id}">Edit</button>
+              <button class="ghost-btn" data-payment-account-toggle="${acc.id}">${acc.active ? 'Deactivate' : 'Activate'}</button>
+              ${user.role === 'SUPER_ADMIN' ? `<button class="ghost-btn" data-payment-account-delete="${acc.id}">Delete</button>` : ''}
             </div>
           </div>
         `).join('') : '<div class="muted">No payment accounts configured.</div>'}
@@ -2467,26 +2495,118 @@ function bindAdminForms() {
     });
   });
 
+  // Payment account management handlers
+  document.getElementById('create-payment-account-btn')?.addEventListener('click', async () => {
+    const type = prompt('Account type (BANK or WALLET):', 'BANK');
+    if (!type) return;
+    const accountName = prompt('Account holder name:');
+    if (!accountName) return;
+    const accountNumber = prompt('Account number:');
+    if (!accountNumber) return;
+    let bankName = '';
+    if (type.toUpperCase() === 'BANK') {
+      bankName = prompt('Bank name:');
+      if (!bankName) return;
+    }
+    const displayOrder = prompt('Display order (number, lower appears first):', '0');
+
+    try {
+      await postJson('/api/admin/payment-accounts', {
+        type: type.toUpperCase(),
+        accountName,
+        accountNumber,
+        bankName: type.toUpperCase() === 'BANK' ? bankName : '',
+        displayOrder: Number(displayOrder) || 0,
+        active: true,
+      });
+      location.reload();
+    } catch (error) {
+      alert('Failed to create payment account: ' + error.message);
+    }
+  });
+
+  document.querySelectorAll('[data-payment-account-edit]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const accountId = button.dataset.paymentAccountEdit;
+      const account = (state.bootstrap.paymentAccounts || []).find(acc => acc.id === accountId);
+      if (!account) return;
+
+      const accountName = prompt('Account holder name:', account.accountName);
+      if (accountName === null) return;
+      const accountNumber = prompt('Account number:', account.accountNumber);
+      if (accountNumber === null) return;
+      let bankName = account.bankName;
+      if (account.type === 'BANK') {
+        bankName = prompt('Bank name:', account.bankName);
+        if (bankName === null) return;
+      }
+      const displayOrder = prompt('Display order:', account.displayOrder);
+      if (displayOrder === null) return;
+
+      try {
+        await postJson(`/api/admin/payment-accounts/${encodeURIComponent(accountId)}`, {
+          accountName,
+          accountNumber,
+          bankName,
+          displayOrder: Number(displayOrder) || 0,
+        }, 'PUT');
+        location.reload();
+      } catch (error) {
+        alert('Failed to update payment account: ' + error.message);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-payment-account-toggle]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const accountId = button.dataset.paymentAccountToggle;
+      const account = (state.bootstrap.paymentAccounts || []).find(acc => acc.id === accountId);
+      if (!account) return;
+
+      const action = account.active ? 'deactivate' : 'activate';
+      try {
+        await postJson(`/api/admin/payment-accounts/${encodeURIComponent(accountId)}/${action}`, {});
+        location.reload();
+      } catch (error) {
+        alert('Failed to toggle payment account: ' + error.message);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-payment-account-delete]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const accountId = button.dataset.paymentAccountDelete;
+      if (!confirm('Are you sure you want to delete this payment account?')) return;
+
+      try {
+        await postJson(`/api/admin/payment-accounts/${encodeURIComponent(accountId)}`, {}, 'DELETE');
+        location.reload();
+      } catch (error) {
+        alert('Failed to delete payment account: ' + error.message);
+      }
+    });
+  });
+
   document.querySelectorAll('[data-edit-payment-method]').forEach((button) => {
     button.addEventListener('click', async () => {
       const id = button.dataset.editPaymentMethod;
       const method = bootstrap.paymentMethods.find(m => m.id === id);
       if (!method) return alert('Payment method not found');
-      
+
       const name = prompt('Payment method name:', method.name);
       if (!name) return;
-      
+
       const instructions = prompt('Instructions:', method.instructions);
       if (!instructions) return;
-      
+
       const accountName = prompt('Account name:', method.accountName);
       if (!accountName) return;
-      
+
       const accountNumber = prompt('Account number:', method.accountNumber);
       if (!accountNumber) return;
-      
+
       const referenceHint = prompt('Reference hint:', method.referenceHint);
-      
+
       try {
         await postJson(`/api/admin/payment-methods/${encodeURIComponent(id)}`, { name, instructions, accountName, accountNumber, referenceHint });
         alert('Payment method updated successfully');
@@ -2710,38 +2830,12 @@ function bindAdminForms() {
       }
     });
   });
-      
-      const accountName = prompt('Account holder name:', method.accountName);
-      if (!accountName) return;
-      
-      const accountNumber = prompt('Account/Wallet number:', method.accountNumber);
-      if (!accountNumber) return;
-      
-      const paymentType = prompt('Type (bank/wallet):', method.paymentType || 'bank');
-      const displayOrder = prompt('Display order:', method.displayOrder || 0);
-      const referenceHint = prompt('Reference hint:', method.referenceHint || '');
-      const instructions = prompt('Instructions:', method.instructions || '');
-      const isActive = confirm('Is this payment method active?');
-      
-      await putJson(`/api/admin/payment-methods/${encodeURIComponent(id)}`, {
-        name,
-        accountName,
-        accountNumber,
-        paymentType,
-        displayOrder: Number(displayOrder),
-        referenceHint,
-        instructions,
-        isActive
-      });
-      location.reload();
-    });
-  });
 
   document.querySelectorAll('[data-delete-payment-method]').forEach((button) => {
     button.addEventListener('click', async () => {
       const id = button.dataset.deletePaymentMethod;
       if (!confirm('Are you sure you want to delete this payment method?')) return;
-      
+
       await fetch(`/api/admin/payment-methods/${encodeURIComponent(id)}`, {
         method: 'DELETE',
         credentials: 'include'
