@@ -30,6 +30,7 @@ import {
   completeDepositTransaction,
   completeWithdrawalTransaction,
   createDepositTransaction,
+  createWallet,
   createWithdrawalTransaction,
   createPrizeTransaction,
   creditPrizeToWallet,
@@ -866,6 +867,14 @@ export async function registerPlayer(input) {
       updatedAt: now(),
     };
     state.users.push(user);
+
+    // Create wallet for the new user
+    if (!Array.isArray(state.wallets)) {
+      state.wallets = [];
+    }
+    const wallet = createWallet(user.id);
+    state.wallets.push(wallet);
+
     appendAudit(
       state,
       createAuditEntry({
@@ -875,10 +884,20 @@ export async function registerPlayer(input) {
         entityType: 'USER',
         entityId: user.id,
         after: publicUser(user),
-        metadata: { message: 'Standard player registration' },
+        metadata: { message: 'Standard player registration', walletId: wallet.id },
       }),
     );
-    return { user: publicUser(user), token: createSignedToken({ userId: user.id, role: user.role }) };
+    return {
+      user: {
+        ...publicUser(user),
+        wallet: {
+          id: wallet.id,
+          balance: wallet.balance,
+          currency: wallet.currency,
+        }
+      },
+      token: createSignedToken({ userId: user.id, role: user.role })
+    };
   });
 }
 
@@ -887,8 +906,8 @@ export async function login(input) {
   const identifier = String(input.identifier || '').trim().toLowerCase();
   const password = String(input.password || '');
   const user = state.users.find((item) => item.email?.toLowerCase() === identifier || item.phone === identifier);
-  if (!user) throw new Error('Invalid credentials');
-  if (!verifyPassword(password, user.salt, user.passwordHash)) throw new Error('Invalid credentials');
+  if (!user) throw new Error('No account found with this email or phone number');
+  if (!verifyPassword(password, user.salt, user.passwordHash)) throw new Error('Incorrect password');
 
   // Automatically upgrade konaneba8@gmail.com to SUPER_ADMIN if not already
   let roleUpgradeNeeded = false;

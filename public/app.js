@@ -407,8 +407,21 @@ function bindAuthForms() {
     loginForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       const form = new FormData(loginForm);
-      await postJson('/api/auth/login', Object.fromEntries(form.entries()));
-      location.href = '/dashboard';
+      try {
+        await postJson('/api/auth/login', Object.fromEntries(form.entries()));
+        location.href = '/dashboard';
+      } catch (error) {
+        // Remove any existing error message
+        const existingError = loginForm.querySelector('.login-error');
+        if (existingError) existingError.remove();
+
+        // Add error message
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'login-error';
+        errorDiv.style.cssText = 'color: #dc3545; margin-top: 10px; padding: 10px; background: #f8d7da; border-radius: 4px; font-size: 14px;';
+        errorDiv.textContent = error.message;
+        loginForm.appendChild(errorDiv);
+      }
     });
   }
 
