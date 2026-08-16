@@ -415,11 +415,22 @@ function bindAuthForms() {
         const existingError = loginForm.querySelector('.login-error');
         if (existingError) existingError.remove();
 
-        // Add error message
+        // Add user-friendly error message
         const errorDiv = document.createElement('div');
         errorDiv.className = 'login-error';
         errorDiv.style.cssText = 'color: #dc3545; margin-top: 10px; padding: 10px; background: #f8d7da; border-radius: 4px; font-size: 14px;';
-        errorDiv.textContent = error.message;
+        
+        // Provide user-friendly error messages
+        let errorMessage = error.message;
+        if (error.message === 'Invalid credentials') {
+          errorMessage = 'No account found with these credentials. Please check your email/phone and password, or register a new account.';
+        } else if (error.message.includes('suspended')) {
+          errorMessage = error.message;
+        } else if (error.message.includes('verification')) {
+          errorMessage = error.message;
+        }
+        
+        errorDiv.textContent = errorMessage;
         loginForm.appendChild(errorDiv);
       }
     });
@@ -433,8 +444,31 @@ function bindAuthForms() {
       const payload = Object.fromEntries(form.entries());
       payload.acceptTerms = form.get('acceptTerms') === 'on';
       payload.acceptRules = form.get('acceptRules') === 'on';
-      await postJson('/api/auth/register', payload);
-      location.href = '/dashboard';
+      
+      try {
+        await postJson('/api/auth/register', payload);
+        location.href = '/dashboard';
+      } catch (error) {
+        // Remove any existing error message
+        const existingError = registerForm.querySelector('.register-error');
+        if (existingError) existingError.remove();
+
+        // Add user-friendly error message
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'register-error';
+        errorDiv.style.cssText = 'color: #dc3545; margin-top: 10px; padding: 10px; background: #f8d7da; border-radius: 4px; font-size: 14px;';
+        
+        // Provide user-friendly error messages
+        let errorMessage = error.message;
+        if (error.message === 'Phone already exists') {
+          errorMessage = 'An account with this phone number already exists. Please log in.';
+        } else if (error.message.includes('email already exists')) {
+          errorMessage = error.message;
+        }
+        
+        errorDiv.textContent = errorMessage;
+        registerForm.appendChild(errorDiv);
+      }
     });
   }
 

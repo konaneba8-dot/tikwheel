@@ -20,18 +20,18 @@ import {
   createDeposit,
   createGameTypeAction,
   createLiveBroadcast,
-  createPaymentAccountAction,
+
   createPaymentMethodAction,
   createPromotionCampaign,
   createRound,
   createSuperAdmin,
   createWithdrawal,
   deleteAdmin,
-  deletePaymentAccountAction,
+
   deletePaymentMethodAction,
   drawRound,
   editPaymentMethodAction,
-  getAdminPaymentAccounts,
+
   getAdminPaymentMethods,
   getAuditLog,
   getBroadcastStreamConfig,
@@ -40,7 +40,7 @@ import {
   getHistory,
   getLiveBroadcastDashboard,
   getNotifications,
-  getPaymentAccounts,
+
   getPaymentMethods,
   getPendingVerifications,
   getPromotionDashboard,
@@ -63,13 +63,13 @@ import {
   setupSuperAdmin,
   suspendUser,
   toggleLiveBroadcast,
-  togglePaymentAccountAction,
+
   togglePaymentMethodAction,
   trackPromotionEvent,
   updateAdmin,
   updateFinancialSettings,
-  updatePaymentAccountAction,
-  updateUserProfile,
+
+
   verifyPayment,
   activateUser,
 } from './src/services/app-service.js';
@@ -320,45 +320,7 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, await getAdminPaymentMethods(user));
   }
 
-  if (req.method === 'GET' && url.pathname === '/api/payment-accounts') {
-    return sendJson(res, 200, await getPaymentAccounts());
-  }
 
-  if (req.method === 'GET' && url.pathname === '/api/admin/payment-accounts') {
-    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
-    if (!['SUPER_ADMIN', 'ADMIN', 'MONEY_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
-    return sendJson(res, 200, await getAdminPaymentAccounts(user));
-  }
-
-  if (req.method === 'POST' && url.pathname === '/api/admin/payment-accounts') {
-    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
-    if (!['SUPER_ADMIN', 'ADMIN', 'MONEY_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
-    return sendJson(res, 200, await createPaymentAccountAction(body || {}, user));
-  }
-
-  const paymentAccountEditMatch = url.pathname.match(/^\/api\/admin\/payment-accounts\/([^/]+)$/);
-  if (req.method === 'PUT' && paymentAccountEditMatch) {
-    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
-    if (!['SUPER_ADMIN', 'ADMIN', 'MONEY_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
-    const accountId = decodeURIComponent(paymentAccountEditMatch[1]);
-    return sendJson(res, 200, await updatePaymentAccountAction(accountId, body || {}, user));
-  }
-
-  const paymentAccountToggleMatch = url.pathname.match(/^\/api\/admin\/payment-accounts\/([^/]+)\/toggle$/);
-  if (req.method === 'POST' && paymentAccountToggleMatch) {
-    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
-    if (!['SUPER_ADMIN', 'ADMIN', 'MONEY_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
-    const accountId = decodeURIComponent(paymentAccountToggleMatch[1]);
-    return sendJson(res, 200, await togglePaymentAccountAction(accountId, user));
-  }
-
-  const paymentAccountDeleteMatch = url.pathname.match(/^\/api\/admin\/payment-accounts\/([^/]+)$/);
-  if (req.method === 'DELETE' && paymentAccountDeleteMatch) {
-    if (!user) return sendJson(res, 401, { error: 'Authentication required' });
-    if (!['SUPER_ADMIN', 'ADMIN', 'MONEY_ADMIN'].includes(user.role)) return sendJson(res, 403, { error: 'Forbidden' });
-    const accountId = decodeURIComponent(paymentAccountDeleteMatch[1]);
-    return sendJson(res, 200, await deletePaymentAccountAction(accountId, user));
-  }
 
   if (req.method === 'GET' && url.pathname === '/api/admin/promotions') {
     if (!user) return sendJson(res, 401, { error: 'Authentication required' });

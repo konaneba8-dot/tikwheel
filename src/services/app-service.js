@@ -30,7 +30,6 @@ import {
   completeDepositTransaction,
   completeWithdrawalTransaction,
   createDepositTransaction,
-  createWallet,
   createWithdrawalTransaction,
   createPrizeTransaction,
   creditPrizeToWallet,
@@ -54,14 +53,6 @@ import {
   updateBroadcastViewers,
   validateBroadcastPlatforms,
 } from '../domain/live-broadcast.js';
-import {
-  createPaymentAccount,
-  updatePaymentAccount,
-  activatePaymentAccount,
-  deactivatePaymentAccount,
-  getActivePaymentAccounts,
-  getPaymentAccountsByType,
-} from '../domain/payment-accounts.js';
 
 const SUPER_ADMIN_EMAIL = 'konaneba8@gmail.com';
 
@@ -114,19 +105,7 @@ function canManageFinances(user) {
 }
 
 function canManageGames(user) {
-  return [ROLES.SUPER_ADMIN, ROLES.GAME_ADMIN].includes(user.role);
-}
-
-function canCreateRounds(user) {
-  return [ROLES.SUPER_ADMIN, ROLES.GAME_ADMIN].includes(user.role);
-}
-
-function canDrawRounds(user) {
-  return [ROLES.SUPER_ADMIN, ROLES.GAME_ADMIN].includes(user.role);
-}
-
-function canChangeRoundStatus(user) {
-  return [ROLES.SUPER_ADMIN, ROLES.GAME_ADMIN].includes(user.role);
+  return [ROLES.SUPER_ADMIN, ROLES.GAME_ADMIN, ROLES.ADMIN].includes(user.role);
 }
 
 function canManagePaymentMethods(user) {
@@ -152,9 +131,6 @@ export async function bootstrapState(user) {
   const state = await readState();
   if (!Array.isArray(state.paymentMethods)) {
     state.paymentMethods = [];
-  }
-  if (!Array.isArray(state.paymentAccounts)) {
-    state.paymentAccounts = [];
   }
   if (!Array.isArray(state.promotionCampaigns)) {
     state.promotionCampaigns = [];
@@ -187,7 +163,6 @@ export async function bootstrapState(user) {
   const pendingVerifications = user && [ROLES.ADMIN, ROLES.SUPER_ADMIN].includes(user.role) ? getPendingVerificationsInternal(state) : [];
   const financialSettings = user && [ROLES.SUPER_ADMIN].includes(user.role) ? buildFinancialSettings(state) : null;
   const adminUsers = user && [ROLES.SUPER_ADMIN].includes(user.role) ? state.users.filter((u) => [ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.MONEY_ADMIN, ROLES.GAME_ADMIN, ROLES.WITHDRAWAL_ADMIN].includes(u.role)).map(publicUser) : [];
-  const activePaymentAccounts = getActivePaymentAccounts(state.paymentAccounts);
   return {
     appName: state.meta.appName,
     complianceMode: state.meta.complianceMode,
@@ -200,8 +175,6 @@ export async function bootstrapState(user) {
     user: publicUser(user),
     gameTypes: state.gameTypes,
     paymentMethods: state.paymentMethods,
-    paymentAccounts: state.paymentAccounts,
-    activePaymentAccounts,
     rounds: refreshedRounds,
     activeGameTypes: listActiveGameTypes(state.gameTypes),
     auditLog: (state.auditLog || []).slice(0, 50),
@@ -258,61 +231,10 @@ function buildAdminSummary(state, rounds) {
     0,
   );
 
-  // Financial summary
-  const transactions = state.transactions || [];
-  const totalDeposits = transactions
-    .filter(t => t.type === TRANSACTION_TYPES.DEPOSIT && t.status === TRANSACTION_STATUSES.COMPLETED)
-    .reduce((sum, t) => sum + t.amount, 0);
-
-  const totalWithdrawals = transactions
-    .filter(t => t.type === TRANSACTION_TYPES.WITHDRAW && t.status === TRANSACTION_STATUSES.COMPLETED)
-    .reduce((sum, t) => sum + t.amount, 0);
-
-  const pendingDeposits = transactions
-    .filter(t => t.type === TRANSACTION_TYPES.DEPOSIT && t.status === TRANSACTION_STATUSES.PENDING)
-    .length;
-
-  const pendingWithdrawals = transactions
-    .filter(t => t.type === TRANSACTION_TYPES.WITHDRAW && t.status === TRANSACTION_STATUSES.PENDING)
-    .length;
-
-  const approvedWithdrawals = transactions
-    .filter(t => t.type === TRANSACTION_TYPES.WITHDRAW && t.status === TRANSACTION_STATUSES.APPROVED)
-    .length;
-
-  const readyForPaymentWithdrawals = transactions
-    .filter(t => t.type === TRANSACTION_TYPES.WITHDRAW && t.status === TRANSACTION_STATUSES.READY_FOR_PAYMENT)
-    .length;
-
-  const processingWithdrawals = transactions
-    .filter(t => t.type === TRANSACTION_TYPES.WITHDRAW && t.status === TRANSACTION_STATUSES.PROCESSING)
-    .length;
-
-  const totalWalletBalance = (state.wallets || []).reduce((sum, w) => sum + w.balance, 0);
-
-  const pendingVerifications = (state.users || []).filter(u => u.verificationStatus === USER_VERIFICATION_STATUSES.PENDING_VERIFICATION).length;
-
-  const totalPrizesPaid = transactions
-    .filter(t => t.type === 'PRIZE' && t.status === TRANSACTION_STATUSES.COMPLETED)
-    .reduce((sum, t) => sum + t.amount, 0);
-
   return {
     ...counts,
     pendingPayments,
     activePaymentMethods: (state.paymentMethods || []).filter((method) => method.isActive).length,
-    financial: {
-      totalDeposits,
-      totalWithdrawals,
-      pendingDeposits,
-      pendingWithdrawals,
-      approvedWithdrawals,
-      readyForPaymentWithdrawals,
-      processingWithdrawals,
-      totalWalletBalance,
-      totalPrizesPaid,
-      netBalance: totalDeposits - totalWithdrawals - totalPrizesPaid,
-    },
-    pendingVerifications,
   };
 }
 
@@ -454,7 +376,7 @@ function buildWithdrawalQueue(state) {
   }
 
   const withdrawals = state.transactions.filter((txn) => txn.type === TRANSACTION_TYPES.WITHDRAW);
-
+  
   const pending = withdrawals.filter((w) => w.status === TRANSACTION_STATUSES.PENDING);
   const approved = withdrawals.filter((w) => w.status === TRANSACTION_STATUSES.APPROVED);
   const readyForPayment = withdrawals.filter((w) => w.status === TRANSACTION_STATUSES.READY_FOR_PAYMENT);
@@ -829,15 +751,28 @@ export async function processScheduledPromotions() {
 export async function registerPlayer(input) {
   return mutateState((state) => {
     const fullName = String(input.fullName || '').trim();
-    const phone = String(input.phone || '').trim();
+    const phone = String(input.phone || '').trim().replace(/\s+/g, ''); // Remove all spaces from phone
     const email = String(input.email || '').trim().toLowerCase() || null;
     const password = String(input.password || '');
     const acceptTerms = String(input.acceptTerms || '').toLowerCase() === 'true' || input.acceptTerms === true;
     const acceptRules = String(input.acceptRules || '').toLowerCase() === 'true' || input.acceptRules === true;
+    
     if (!fullName || !phone || !password) throw new Error('Name, phone, and password are required');
     if (!acceptTerms || !acceptRules) throw new Error('You must accept the terms and game rules');
-    if (state.users.some((user) => user.phone === phone)) throw new Error('Phone already exists');
-    if (email && state.users.some((user) => user.email === email)) throw new Error('Email already exists');
+    
+    // Normalize phone for comparison
+    const normalizedPhone = phone.replace(/\s+/g, '');
+    if (state.users.some((user) => user.phone.replace(/\s+/g, '') === normalizedPhone)) {
+      throw new Error('Phone already exists');
+    }
+    
+    // Check for duplicate email with proper normalization
+    if (email) {
+      const normalizedEmail = email.toLowerCase().trim();
+      if (state.users.some((user) => user.email && user.email.toLowerCase().trim() === normalizedEmail)) {
+        throw new Error('An account with this email already exists. Please log in.');
+      }
+    }
 
     // Automatically assign SUPER_ADMIN role to konaneba8@gmail.com
     const role = (email && email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase()) ? ROLES.SUPER_ADMIN : ROLES.PLAYER;
@@ -847,14 +782,12 @@ export async function registerPlayer(input) {
       id: `usr_${crypto.randomUUID()}`,
       role,
       fullName,
-      phone,
+      phone: normalizedPhone, // Store normalized phone
       email,
       passwordHash: hash,
       salt,
       location: String(input.location || '').trim() || null,
       verificationStatus: USER_VERIFICATION_STATUSES.PENDING_VERIFICATION,
-      idDocumentUrl: input.idDocumentUrl || null,
-      idDocumentType: input.idDocumentType || null,
       acceptedTermsVersion: state.meta.termsVersion || '1.0',
       acceptedGameRulesVersion: state.meta.gameRulesVersion || '1.0',
       acceptedTermsAt: now(),
@@ -867,14 +800,6 @@ export async function registerPlayer(input) {
       updatedAt: now(),
     };
     state.users.push(user);
-
-    // Create wallet for the new user
-    if (!Array.isArray(state.wallets)) {
-      state.wallets = [];
-    }
-    const wallet = createWallet(user.id);
-    state.wallets.push(wallet);
-
     appendAudit(
       state,
       createAuditEntry({
@@ -884,20 +809,10 @@ export async function registerPlayer(input) {
         entityType: 'USER',
         entityId: user.id,
         after: publicUser(user),
-        metadata: { message: 'Standard player registration', walletId: wallet.id },
+        metadata: { message: 'Standard player registration' },
       }),
     );
-    return {
-      user: {
-        ...publicUser(user),
-        wallet: {
-          id: wallet.id,
-          balance: wallet.balance,
-          currency: wallet.currency,
-        }
-      },
-      token: createSignedToken({ userId: user.id, role: user.role })
-    };
+    return { user: publicUser(user), token: createSignedToken({ userId: user.id, role: user.role }) };
   });
 }
 
@@ -905,70 +820,52 @@ export async function login(input) {
   const state = await readState();
   const identifier = String(input.identifier || '').trim().toLowerCase();
   const password = String(input.password || '');
-  const user = state.users.find((item) => item.email?.toLowerCase() === identifier || item.phone === identifier);
-  if (!user) throw new Error('No account found with this email or phone number');
-  if (!verifyPassword(password, user.salt, user.passwordHash)) throw new Error('Incorrect password');
-
-  // Automatically upgrade konaneba8@gmail.com to SUPER_ADMIN if not already
-  let roleUpgradeNeeded = false;
-  if (user.email && user.email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase() && user.role !== ROLES.SUPER_ADMIN) {
-    roleUpgradeNeeded = true;
+  
+  // Normalize identifier for comparison (remove spaces from phone numbers)
+  const normalizedIdentifier = identifier.replace(/\s+/g, '');
+  
+  // Find user by email or normalized phone
+  const user = state.users.find((item) => 
+    (item.email && item.email.toLowerCase().trim() === normalizedIdentifier) || 
+    (item.phone && item.phone.replace(/\s+/g, '') === normalizedIdentifier)
+  );
+  
+  if (!user) {
+    throw new Error('No account found with these credentials. Please check your email/phone and password, or register a new account.');
+  }
+  
+  if (!verifyPassword(password, user.salt, user.passwordHash)) {
+    throw new Error('Incorrect password. Please try again.');
   }
 
-  const result = await mutateState((draft) => {
-    const loginUser = draft.users.find((u) => u.id === user.id);
+  // Check account status and provide appropriate error messages
+  if (user.isActive === false) {
+    throw new Error('Your account has been suspended. Please contact support.');
+  }
 
-    if (roleUpgradeNeeded && loginUser) {
-      loginUser.role = ROLES.SUPER_ADMIN;
-      loginUser.verificationStatus = USER_VERIFICATION_STATUSES.VERIFIED;
-      loginUser.updatedAt = now();
+  // Allow users with pending verification to log in - verification happens later via admin
+  // No verification check at login - account is created immediately with Pending Verification status
 
-      appendAudit(
-        draft,
-        createAuditEntry({
-          actorUserId: user.id,
-          actorRole: ROLES.SUPER_ADMIN,
-          action: AUDIT_ACTIONS.ADMIN_ROLE_CHANGED,
-          entityType: 'USER',
-          entityId: user.id,
-          before: { role: user.role },
-          after: { role: ROLES.SUPER_ADMIN },
-          metadata: { reason: 'Automatic SUPER_ADMIN assignment' },
-        }),
-      );
-    }
-
-    // Allow users with pending verification to log in - verification happens later via admin
-    // No verification check at login - account is created immediately with Pending Verification status
-
+  await mutateState((draft) => {
     appendAudit(
       draft,
       createAuditEntry({
         actorUserId: user.id,
-        actorRole: roleUpgradeNeeded ? ROLES.SUPER_ADMIN : user.role,
+        actorRole: user.role,
         action: AUDIT_ACTIONS.USER_LOGGED_IN,
         entityType: 'USER',
         entityId: user.id,
         metadata: { loginMethod: 'credentials' },
       }),
     );
-
-    return { role: roleUpgradeNeeded ? ROLES.SUPER_ADMIN : user.role };
   });
-
-  // Update user role if it was upgraded
-  if (roleUpgradeNeeded) {
-    user.role = ROLES.SUPER_ADMIN;
-    user.verificationStatus = USER_VERIFICATION_STATUSES.VERIFIED;
-  }
-
   return { user: publicUser(user), token: createSignedToken({ userId: user.id, role: user.role }) };
 }
 
 export async function completeSocialSignup(input) {
   return mutateState((state) => {
     const fullName = String(input.fullName || '').trim();
-    const phone = String(input.phone || '').trim();
+    const phone = String(input.phone || '').trim().replace(/\s+/g, ''); // Normalize phone
     const location = String(input.location || '').trim() || null;
     const provider = String(input.provider || '').trim();
     const socialId = String(input.socialId || '').trim();
@@ -986,8 +883,11 @@ export async function completeSocialSignup(input) {
       return { user: publicUser(existingUser), token: createSignedToken({ userId: existingUser.id, role: existingUser.role }) };
     }
 
-    // Check if phone already exists
-    if (state.users.some((user) => user.phone === phone)) throw new Error('Phone already exists');
+    // Check if phone already exists with normalization
+    const normalizedPhone = phone.replace(/\s+/g, '');
+    if (state.users.some((user) => user.phone.replace(/\s+/g, '') === normalizedPhone)) {
+      throw new Error('Phone already exists');
+    }
 
     // All new users start as PLAYER
     const role = ROLES.PLAYER;
@@ -999,14 +899,12 @@ export async function completeSocialSignup(input) {
       id: `usr_${crypto.randomUUID()}`,
       role,
       fullName,
-      phone,
+      phone: normalizedPhone, // Store normalized phone
       email: null,
       passwordHash: hash,
       salt,
       location,
       verificationStatus: USER_VERIFICATION_STATUSES.PENDING_VERIFICATION,
-      idDocumentUrl: input.idDocumentUrl || null,
-      idDocumentType: input.idDocumentType || null,
       acceptedTermsVersion: state.meta.termsVersion || '1.0',
       acceptedGameRulesVersion: state.meta.gameRulesVersion || '1.0',
       acceptedTermsAt: now(),
@@ -1045,7 +943,7 @@ export async function resolveUserFromCookie(cookieValue) {
 }
 
 export async function approveUserVerification(userId, actor) {
-  requireRole(actor, [ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.MONEY_ADMIN]);
+  requireAdminOrSuperAdmin(actor);
   return mutateState((state) => {
     const user = state.users.find((item) => item.id === userId);
     if (!user) throw new Error('User not found');
@@ -1055,7 +953,7 @@ export async function approveUserVerification(userId, actor) {
 
     // Create notification for user
     addNotification(state, createNotification(
-      NOTIFICATION_TYPES.USER_VERIFICATION_APPROVED,
+      NOTIFICATION_TYPES.NEW_USER_VERIFICATION,
       'Your account has been verified',
       user.id,
       { userId: user.id }
@@ -1079,7 +977,7 @@ export async function approveUserVerification(userId, actor) {
 }
 
 export async function rejectUserVerification(userId, reason, actor) {
-  requireRole(actor, [ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.MONEY_ADMIN]);
+  requireAdminOrSuperAdmin(actor);
   return mutateState((state) => {
     const user = state.users.find((item) => item.id === userId);
     if (!user) throw new Error('User not found');
@@ -1087,14 +985,6 @@ export async function rejectUserVerification(userId, reason, actor) {
     user.verificationStatus = USER_VERIFICATION_STATUSES.REJECTED;
     user.verificationRejectionReason = String(reason || 'Verification rejected by admin');
     user.updatedAt = now();
-
-    // Create notification for user
-    addNotification(state, createNotification(
-      NOTIFICATION_TYPES.USER_VERIFICATION_REJECTED,
-      `Your account verification has been rejected: ${reason}`,
-      user.id,
-      { userId: user.id, reason }
-    ));
 
     appendAudit(
       state,
@@ -1337,48 +1227,12 @@ export async function activateUser(userId, actor) {
 }
 
 export async function getPendingVerifications(user) {
-  requireRole(user, [ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.MONEY_ADMIN]);
+  requireRole(user, [ROLES.ADMIN, ROLES.SUPER_ADMIN]);
   const state = await readState();
   return state.users
     .filter((u) => u.verificationStatus === USER_VERIFICATION_STATUSES.PENDING_VERIFICATION)
     .map((u) => publicUser(u))
     .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
-}
-
-export async function updateUserProfile(userId, input, actor) {
-  return mutateState((state) => {
-    const user = state.users.find((item) => item.id === userId);
-    if (!user) throw new Error('User not found');
-
-    // Users can only update their own profile
-    if (user.id !== actor.id) {
-      throw new Error('Forbidden: Can only update your own profile');
-    }
-
-    // Allow updating ID document for verification
-    if (input.idDocumentUrl !== undefined) {
-      user.idDocumentUrl = input.idDocumentUrl;
-    }
-    if (input.idDocumentType !== undefined) {
-      user.idDocumentType = input.idDocumentType;
-    }
-
-    user.updatedAt = now();
-
-    appendAudit(
-      state,
-      createAuditEntry({
-        actorUserId: actor.id,
-        actorRole: actor.role,
-        action: AUDIT_ACTIONS.USER_PROFILE_UPDATED,
-        entityType: 'USER',
-        entityId: user.id,
-        after: { idDocumentUrl: user.idDocumentUrl, idDocumentType: user.idDocumentType },
-      }),
-    );
-
-    return publicUser(user);
-  });
 }
 
 export async function listRoundSummaries() {
@@ -1412,125 +1266,6 @@ export async function getAdminPaymentMethods(user) {
   const methods = buildPaymentMethods(state);
   // Return all payment methods for admin (including inactive)
   return methods.sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
-}
-
-export async function getPaymentAccounts() {
-  const state = await readState();
-  if (!Array.isArray(state.paymentAccounts)) {
-    state.paymentAccounts = [];
-  }
-  return getActivePaymentAccounts(state.paymentAccounts);
-}
-
-export async function getAdminPaymentAccounts(user) {
-  requireAdminOrSuperAdmin(user);
-  const state = await readState();
-  if (!Array.isArray(state.paymentAccounts)) {
-    state.paymentAccounts = [];
-  }
-  return state.paymentAccounts.sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
-}
-
-export async function createPaymentAccountAction(input, actor) {
-  requireAdminOrSuperAdmin(actor);
-  return mutateState((state) => {
-    if (!Array.isArray(state.paymentAccounts)) {
-      state.paymentAccounts = [];
-    }
-    const account = createPaymentAccount(input, actor.id);
-    state.paymentAccounts.unshift(account);
-    appendAudit(
-      state,
-      createAuditEntry({
-        actorUserId: actor.id,
-        actorRole: actor.role,
-        action: AUDIT_ACTIONS.PAYMENT_METHOD_CREATED,
-        entityType: 'PAYMENT_ACCOUNT',
-        entityId: account.id,
-        after: account,
-      }),
-    );
-    return account;
-  });
-}
-
-export async function updatePaymentAccountAction(accountId, input, actor) {
-  requireAdminOrSuperAdmin(actor);
-  return mutateState((state) => {
-    if (!Array.isArray(state.paymentAccounts)) {
-      state.paymentAccounts = [];
-    }
-    const account = state.paymentAccounts.find((acc) => acc.id === accountId);
-    if (!account) throw new Error('Payment account not found');
-    const previousAccount = { ...account };
-    updatePaymentAccount(account, input, actor.id);
-    appendAudit(
-      state,
-      createAuditEntry({
-        actorUserId: actor.id,
-        actorRole: actor.role,
-        action: AUDIT_ACTIONS.PAYMENT_METHOD_UPDATED,
-        entityType: 'PAYMENT_ACCOUNT',
-        entityId: account.id,
-        before: previousAccount,
-        after: account,
-      }),
-    );
-    return account;
-  });
-}
-
-export async function togglePaymentAccountAction(accountId, actor) {
-  requireAdminOrSuperAdmin(actor);
-  return mutateState((state) => {
-    if (!Array.isArray(state.paymentAccounts)) {
-      state.paymentAccounts = [];
-    }
-    const account = state.paymentAccounts.find((acc) => acc.id === accountId);
-    if (!account) throw new Error('Payment account not found');
-    if (account.active) {
-      deactivatePaymentAccount(account, actor.id);
-    } else {
-      activatePaymentAccount(account, actor.id);
-    }
-    appendAudit(
-      state,
-      createAuditEntry({
-        actorUserId: actor.id,
-        actorRole: actor.role,
-        action: AUDIT_ACTIONS.PAYMENT_METHOD_UPDATED,
-        entityType: 'PAYMENT_ACCOUNT',
-        entityId: account.id,
-        after: account,
-      }),
-    );
-    return account;
-  });
-}
-
-export async function deletePaymentAccountAction(accountId, actor) {
-  requireAdminOrSuperAdmin(actor);
-  return mutateState((state) => {
-    if (!Array.isArray(state.paymentAccounts)) {
-      state.paymentAccounts = [];
-    }
-    const accountIndex = state.paymentAccounts.findIndex((acc) => acc.id === accountId);
-    if (accountIndex === -1) throw new Error('Payment account not found');
-    const deletedAccount = state.paymentAccounts[accountIndex];
-    state.paymentAccounts.splice(accountIndex, 1);
-    appendAudit(
-      state,
-      createAuditEntry({
-        actorUserId: actor.id,
-        actorRole: actor.role,
-        action: AUDIT_ACTIONS.PAYMENT_METHOD_DELETED,
-        entityType: 'PAYMENT_ACCOUNT',
-        entityId: deletedAccount.id,
-        before: deletedAccount,
-      }),
-    );
-    return { deleted: true, id: deletedAccount.id };
-  });
 }
 
 export async function getRoundAuditTrail(roundId, user = null) {
@@ -1627,7 +1362,7 @@ export async function createGameTypeAction(input, actor) {
       createAuditEntry({
         actorUserId: actor.id,
         actorRole: actor.role,
-        action: AUDIT_ACTIONS.GAME_TYPE_CREATED,
+        action: AUDIT_ACTIONS.ROUND_CREATED,
         entityType: 'GAME_TYPE',
         entityId: gameType.id,
         after: gameType,
@@ -1656,7 +1391,7 @@ export async function createPaymentMethodAction(input, actor) {
       createdAt: now(),
       updatedAt: now(),
     };
-
+    
     if (!paymentMethod.name) throw new Error('Payment method name is required');
     if (!paymentMethod.paymentType || !['bank', 'wallet'].includes(paymentMethod.paymentType)) {
       throw new Error('Payment type must be either "bank" or "wallet"');
@@ -1667,7 +1402,7 @@ export async function createPaymentMethodAction(input, actor) {
     if (paymentMethod.paymentType === 'wallet' && (!paymentMethod.walletName || !paymentMethod.walletNumber)) {
       throw new Error('Wallet name and wallet number are required for wallet payment type');
     }
-
+    
     paymentMethods.unshift(paymentMethod);
     appendAudit(
       state,
@@ -1904,14 +1639,6 @@ export async function drawRound(roundId, actor) {
 
         const prizeResult = creditPrizeToWallet(prizeTransaction, wallet);
 
-        // Create notification for user
-        addNotification(state, createNotification(
-          NOTIFICATION_TYPES.PRIZE_CREDITED,
-          `Congratulations! You won ${round.prize} ETB as prize for position ${winner.position}`,
-          user.id,
-          { amount: round.prize, roundId: round.id, position: winner.position, transactionId: prizeTransaction.id }
-        ));
-
         appendAudit(
           state,
           createAuditEntry({
@@ -2009,6 +1736,11 @@ export async function createDeposit(input, actor) {
       referralNumber: input.paymentDetails?.referralNumber || null,
     };
 
+    // Require ID document for deposit verification
+    if (!input.paymentDetails?.idDocumentUrl) {
+      throw new Error('ID document upload is required for deposit verification');
+    }
+
     // Require payment receipt
     if (!input.paymentDetails?.receiptUrl) {
       throw new Error('Payment receipt upload is required');
@@ -2028,7 +1760,7 @@ export async function createDeposit(input, actor) {
     const transaction = createDepositTransaction(actor.id, input.amount, input.paymentMethod, paymentDetails);
     state.transactions = state.transactions || [];
     state.transactions.unshift(transaction);
-
+    
     // Create notification for admins
     addNotification(state, createNotification(
       NOTIFICATION_TYPES.NEW_DEPOSIT,
@@ -2036,7 +1768,7 @@ export async function createDeposit(input, actor) {
       null,
       { userId: actor.id, amount: input.amount, transactionId: transaction.id }
     ));
-
+    
     appendAudit(
       state,
       createAuditEntry({
@@ -2059,15 +1791,6 @@ export async function completeDeposit(transactionId, actor) {
     if (!transaction) throw new Error('Transaction not found');
     const wallet = getUserWallet(state, transaction.userId);
     const result = completeDepositTransaction(transaction, wallet);
-
-    // Create notification for user
-    addNotification(state, createNotification(
-      NOTIFICATION_TYPES.DEPOSIT_APPROVED,
-      `Your deposit of ${transaction.amount} ETB has been approved and credited to your wallet`,
-      transaction.userId,
-      { amount: transaction.amount, transactionId: transaction.id }
-    ));
-
     appendAudit(
       state,
       createAuditEntry({
@@ -2089,15 +1812,6 @@ export async function rejectDeposit(transactionId, reason, actor) {
     const transaction = (state.transactions || []).find((txn) => txn.id === transactionId);
     if (!transaction) throw new Error('Transaction not found');
     const result = failDepositTransaction(transaction, reason);
-
-    // Create notification for user
-    addNotification(state, createNotification(
-      NOTIFICATION_TYPES.DEPOSIT_REJECTED,
-      `Your deposit of ${transaction.amount} ETB has been rejected: ${reason}`,
-      transaction.userId,
-      { amount: transaction.amount, transactionId: transaction.id, reason }
-    ));
-
     appendAudit(
       state,
       createAuditEntry({
@@ -2130,7 +1844,7 @@ export async function createWithdrawal(input, actor) {
     const transaction = createWithdrawalTransaction(actor.id, input.amount, input.paymentDetails);
     state.transactions = state.transactions || [];
     state.transactions.unshift(transaction);
-
+    
     // Create notification for admins
     addNotification(state, createNotification(
       NOTIFICATION_TYPES.NEW_WITHDRAWAL,
@@ -2138,7 +1852,7 @@ export async function createWithdrawal(input, actor) {
       null,
       { userId: actor.id, amount: input.amount, transactionId: transaction.id }
     ));
-
+    
     appendAudit(
       state,
       createAuditEntry({
@@ -2161,15 +1875,6 @@ export async function approveWithdrawal(transactionId, actor) {
     if (!transaction) throw new Error('Transaction not found');
     const wallet = getUserWallet(state, transaction.userId);
     const result = approveWithdrawalTransaction(transaction, wallet);
-
-    // Create notification for user
-    addNotification(state, createNotification(
-      NOTIFICATION_TYPES.WITHDRAWAL_APPROVED,
-      `Your withdrawal request of ${transaction.amount} ETB has been approved`,
-      transaction.userId,
-      { amount: transaction.amount, transactionId: transaction.id }
-    ));
-
     appendAudit(
       state,
       createAuditEntry({
@@ -2211,12 +1916,12 @@ export async function setWithdrawalProcessing(transactionId, actor) {
   return mutateState((state) => {
     const transaction = (state.transactions || []).find((txn) => txn.id === transactionId);
     if (!transaction) throw new Error('Transaction not found');
-
+    
     // Prevent withdrawal admin from processing their own withdrawal
     if (actor.role === ROLES.WITHDRAWAL_ADMIN && transaction.userId === actor.id) {
       throw new Error('Withdrawal Admin cannot process their own withdrawal request');
     }
-
+    
     const result = markWithdrawalProcessing(transaction);
     appendAudit(
       state,
@@ -2238,22 +1943,13 @@ export async function setWithdrawalPaid(transactionId, transferProof, actor) {
   return mutateState((state) => {
     const transaction = (state.transactions || []).find((txn) => txn.id === transactionId);
     if (!transaction) throw new Error('Transaction not found');
-
+    
     // Prevent withdrawal admin from paying their own withdrawal
     if (actor.role === ROLES.WITHDRAWAL_ADMIN && transaction.userId === actor.id) {
       throw new Error('Withdrawal Admin cannot pay their own withdrawal request');
     }
-
+    
     const result = markWithdrawalPaid(transaction, transferProof);
-
-    // Create notification for user
-    addNotification(state, createNotification(
-      NOTIFICATION_TYPES.WITHDRAWAL_PAID,
-      `Your withdrawal of ${transaction.amount} ETB has been paid`,
-      transaction.userId,
-      { amount: transaction.amount, transactionId: transaction.id }
-    ));
-
     appendAudit(
       state,
       createAuditEntry({
@@ -2321,15 +2017,6 @@ export async function rejectWithdrawal(transactionId, reason, actor) {
     const transaction = (state.transactions || []).find((txn) => txn.id === transactionId);
     if (!transaction) throw new Error('Transaction not found');
     const result = rejectWithdrawalTransaction(transaction, reason);
-
-    // Create notification for user
-    addNotification(state, createNotification(
-      NOTIFICATION_TYPES.WITHDRAWAL_REJECTED,
-      `Your withdrawal request of ${transaction.amount} ETB has been rejected: ${reason}`,
-      transaction.userId,
-      { amount: transaction.amount, transactionId: transaction.id, reason }
-    ));
-
     appendAudit(
       state,
       createAuditEntry({
